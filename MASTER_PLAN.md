@@ -4,7 +4,9 @@
 
 Black-owned small businesses face disproportionate barriers to capital and customer retention. This app solves both sides: a **Shared Asset Vault (SAV)** for community-funded microloans, and an **MPT loyalty rewards system** that drives repeat revenue — all built on XRPL with a crypto abstraction layer so customers and businesses never touch crypto directly.
 
-**Key architectural decision**: The entire crypto/XRPL layer is invisible to end users. Customers pay by card and see "reward points." Businesses see USD balances in their dashboard. Only community lenders interact with the blockchain directly.
+**Key architectural decision**: The entire crypto/XRPL layer is invisible to **all** end users. Customers pay by card and see "reward points." Businesses see USD balances in their dashboard. Community lenders deposit and withdraw via Stripe and see USD balances and earned interest in their dashboard. No user ever touches crypto.
+
+**Hybrid persistence (Minimal Contract + SQLite)**: The Rust WASM smart contract is kept but shrunk to 4 vault functions only. All circle, loan, proof, tier, and interest logic lives in SQLite (`better-sqlite3`, no server, just a local file). XRPL handles the impressive on-chain primitives (RLUSD payments, MPT minting, escrows, credentials). SQLite handles application state that doesn't need to be on-chain. This is the pragmatic hackathon choice: the on-chain pieces are what judges care about; circle governance doesn't need to be a blockchain primitive.
 
 **Business crypto abstraction (Custodial Model — Option B)**: Businesses do **not** have their own XRPL wallets. The platform holds RLUSD on behalf of businesses in a platform-managed custodial account, tracking each business's balance in an internal ledger. Businesses see dollar amounts in their dashboard and can "withdraw" (which triggers a platform → Stripe Connect payout). This means:
 - No XRPL wallet creation per business
@@ -75,6 +77,7 @@ nsbehacks/
       lib/
         xrpl/                     # XRPL transaction builders
         stripe/                   # Stripe payment integration
+        db.js                     # SQLite connection + schema (better-sqlite3)
         networks.js               # Copied from apps/web/lib/networks.js
         constants.js              # Contract addresses, MPT IDs, fee rates
       next.config.js              # Copied from apps/web (same polyfills)
@@ -166,7 +169,7 @@ Community Member Arrives — wants to support Black economic empowerment
   ↓
 Create Anonymous Account (no real-world ID, pseudonym model)
   ↓
-Contribute RLUSD to Shared Asset Vault / SAV (funds pooled with other lenders)
+Deposit to Shared Asset Vault / SAV via Stripe card payment (funds pooled with other lenders)
   ↓
 Smart Contract Records Contribution (tracks exact amount per lender)
   ↓
@@ -178,14 +181,14 @@ Dashboard: Track Contributions (which loans your capital funded, milestone progr
   ↓
 Borrower Repays Loan + Interest → Returns to SAV (e.g. 5% APR)
   ↓
-Lender Receives Pro-Rata Share of Interest (proportional to contribution)
+Lender Sees Pro-Rata Interest in Dashboard (proportional to contribution)
   ↓
-Re-contribute or Withdraw (principal + earned interest)
+Re-contribute or Withdraw (platform balance — Stripe Connect payout for real withdrawals)
 ```
 
 **Lender → Borrower → Lender Full Cycle (Smart Contract Managed)**:
 ```
-Lender deposits $5,000 RLUSD → SAV Vault (smart contract records contribution)
+Lender deposits $5,000 via Stripe card payment → platform converts to RLUSD → SAV Vault (smart contract records contribution)
   ↓
 Borrower approved for $3,000 loan (3 tranches × $1,000)
   ↓
@@ -244,7 +247,12 @@ The entire crypto layer is invisible to customers and businesses. They interact 
 | Card payment | Stripe charge → converted to RLUSD stablecoin |
 | Post-purchase | Platform mints MPT tokens to customer's internal account |
 | Point redemption | MPT → RLUSD swap executed, USD credited to business's internal ledger |
+| Lender deposit | Lender pays via Stripe → platform converts to RLUSD → deposited into SAV on-chain |
 | Vault operations | RLUSD held in SAV, disbursed as microloans in installments |
+
+### Stripe Test Mode (Demo / Hackathon)
+
+The entire app runs on **Stripe test mode** for demos. No real money is processed. Use the Stripe test card `4242 4242 4242 4242` (any future expiry, any CVC) for all payment flows — customer checkout, lender deposits, and borrower repayments.
 
 ---
 
@@ -344,13 +352,14 @@ Query customer point balance: `account_objects` with `type: "mptoken"` — patte
 The SAV is an XRPL account that holds RLUSD pooled from community lenders. The vault-contract smart contract tracks per-lender contributions and vault health.
 
 **`api/vault/deposit/route.js`**:
-1. Lender sends RLUSD `Payment` to vault account (lender signs via wallet)
-2. API calls `ContractCall` to `vault-contract.deposit()` to record contribution
-3. Pattern: `apps/web/components/ContractInteraction.js` lines 42-56 for ContractCall
+1. Stripe PaymentIntent created for lender's card deposit
+2. On Stripe webhook confirmation, platform converts USD to RLUSD and deposits into vault on-chain
+3. API calls `ContractCall` to `vault-contract.deposit()` to record contribution
+4. Pattern: `apps/web/components/ContractInteraction.js` lines 42-56 for ContractCall
 
 **`api/vault/withdraw/route.js`**:
 1. API calls `ContractCall` to check lender's withdrawable share
-2. Vault account sends RLUSD back to lender
+2. Platform credits lender's withdrawal balance (Stripe Connect payout or platform balance for demo)
 3. Contract state updated via `vault-contract.withdraw()`
 
 **`api/vault/status/route.js`**:
@@ -360,11 +369,11 @@ The SAV is an XRPL account that holds RLUSD pooled from community lenders. The v
 ### B5. Lending Circle + Microloan System (`api/lending/`)
 
 **`api/lending/apply/route.js`** — Borrower requests a loan:
-1. Verify borrower is in an active circle (check on-chain credential)
-2. Check graduated tier via `ContractCall` to `get_borrower_tier()`
-3. Verify vault has sufficient capital
-4. Create loan record via `ContractCall` to `request_loan()`
-5. Calculate interest (e.g. 5% APR → total repayment = principal × 1.05)
+1. Verify borrower is in an active circle (check on-chain credential via XRPL)
+2. Check graduated tier via SQLite query on `borrower_tiers` table
+3. Verify vault has sufficient capital via `ContractCall` to `get_vault_total()`
+4. Insert loan record into SQLite `loans` table; insert tranche rows into `tranches` table
+5. Calculate interest (e.g. 5% APR → total repayment = principal × 1.05) in JS
 6. Split loan into milestone tranches (e.g. $3,000 loan = 3 × $1,000)
 7. Create XRPL escrow for first tranche only (next escrow created after previous milestone met)
 
@@ -399,25 +408,23 @@ const escrowTx = {
 If `CancelAfter` is reached without proof approval, the escrow auto-cancels and funds return to the SAV vault. This protects lender capital from stalled loans.
 
 **`api/lending/submit-proof/route.js`** — Borrower submits milestone proof:
-1. Validate borrower has an active loan with pending milestone
-2. Store proof metadata (type, description, file reference)
-3. Notify circle members for review
-4. `ContractCall` to `submit_proof(loan_id, tranche_id, proof_hash)`
+1. Validate borrower has an active loan with pending milestone (SQLite query on `tranches`)
+2. Insert proof metadata (type, description, file reference) into SQLite `proofs` table
+3. Update `tranches` row status to `proof_submitted`
 
 **`api/lending/approve-proof/route.js`** — Circle member approves milestone proof:
-1. Verify caller is a circle member (check credential)
-2. Record approval via `ContractCall` to `approve_proof(loan_id, tranche_id)`
-3. If approval threshold met (e.g. 2/4 members), provide escrow fulfillment
+1. Verify caller is a circle member (check on-chain credential via XRPL)
+2. Insert approval into SQLite `proof_approvals` table
+3. If approval count threshold met (e.g. 2/4 members, checked in JS), provide escrow fulfillment
 4. `EscrowFinish` with fulfillment releases tranche to borrower
-5. Create next tranche escrow if more milestones remain
+5. Update SQLite `tranches` row status to `released`; create next tranche escrow if more milestones remain
 
 **`api/lending/repay/route.js`**:
-1. Borrower sends RLUSD to vault account (principal + interest portion)
-2. `ContractCall` to `record_repayment()` updates loan state
-3. Smart contract calculates interest earned and attributes pro-rata to lenders
-4. `ContractCall` to `distribute_interest(loan_id)` updates each lender's earned interest balance
-5. On full repayment (all principal + interest), borrower tier upgraded via `upgrade_tier()`
-6. Lenders can now withdraw their principal + earned interest from the vault
+1. Borrower pays via Stripe card (principal + interest portion) → platform converts to RLUSD → repayment recorded on-chain via XRPL Payment to vault
+2. Update SQLite `loans` row (`repaid_amount`, `status`) in JS
+3. Calculate pro-rata interest share per lender in JS; update `lender_interest` rows in SQLite
+4. On full repayment, update `borrower_tiers` row in SQLite (`tier`, `completed_count`)
+5. Update vault contract via `ContractCall` to `deposit()` to reflect repaid capital returning to vault
 
 **Credential-Based Circle Membership**:
 - Platform issues `CredentialCreate` with type `"CIRCLE_MEMBER"` to each circle member
@@ -441,6 +448,8 @@ If `CancelAfter` is reached without proof approval, the escrow auto-cancels and 
 
 ### B7. Vault Smart Contract (`packages/bedrock/vault-contract/src/lib.rs`)
 
+**Slimmed to 4 functions only.** Circle, loan, proof, tier, and interest logic all moved to SQLite. The contract's only job is tracking vault balances on-chain — enough for transparency and to impress judges without 25 functions to debug at 3am.
+
 Follows exact pattern from `packages/bedrock/contract/src/lib.rs`:
 
 ```rust
@@ -450,59 +459,22 @@ use xrpl_wasm_std::core::current_tx::traits::ContractCallFields;
 use xrpl_wasm_std::core::data::codec::{get_data, set_data};
 
 // Storage keys:
-// --- Vault ---
-// "vault_total"                         -> u64 (total RLUSD in vault, base units)
-// "vault_members"                       -> u32 (lender count)
-// "vault_member_{hash}"                 -> u64 (individual contribution)
-// "vault_member_{hash}_interest"        -> u64 (earned interest, withdrawable)
-// "vault_interest_rate"                 -> u32 (basis points, e.g. 500 = 5% APR)
-// --- Circles ---
-// "circle_count"                        -> u32 (total circles)
-// "circle_{id}_size"                    -> u32 (member count)
-// "circle_{id}_status"                  -> u8  (0=forming, 1=active, 2=closed)
-// --- Loans ---
-// "loan_count"                          -> u32 (total loans)
-// "loan_{id}_amount"                    -> u64 (principal)
-// "loan_{id}_interest_due"              -> u64 (total interest owed)
-// "loan_{id}_tranches"                  -> u32 (number of milestone tranches)
-// "loan_{id}_tranche_{n}_amount"        -> u64 (amount per tranche)
-// "loan_{id}_tranche_{n}_status"        -> u8  (0=pending, 1=proof_submitted, 2=approved, 3=released, 4=cancelled)
-// "loan_{id}_tranche_{n}_proof"         -> u64 (proof hash)
-// "loan_{id}_tranche_{n}_approvals"     -> u32 (number of circle member approvals)
-// "loan_{id}_disbursed"                 -> u64
-// "loan_{id}_repaid"                    -> u64
-// "loan_{id}_status"                    -> u8  (0=pending, 1=active, 2=repaid, 3=defaulted)
-// --- Borrower ---
-// "borrower_{hash}_tier"                -> u8  (1=micro, 2=small, 3=medium)
-// "borrower_{hash}_completed"           -> u32 (successful repayments count)
+// "vault_total"          -> u64 (total RLUSD pooled, base units)
+// "vault_members"        -> u32 (lender count)
+// "vault_member_{hash}"  -> u64 (individual lender contribution)
 
 // Exported functions (all #[unsafe(no_mangle)] pub extern "C" fn -> i32):
-// --- Vault ---
-// deposit(amount: u64)
-// withdraw(amount: u64)                         — withdraws principal + earned interest
-// get_vault_total()
-// get_lender_balance(addr_hash: u32)             — returns contribution + earned interest
-// --- Circles ---
-// create_circle()
-// join_circle(circle_id: u32)
-// get_circle_status(circle_id: u32)
-// --- Loans ---
-// request_loan(circle_id: u32, amount: u64, num_tranches: u32)
-// record_disbursement(loan_id: u32, tranche_id: u32, amount: u64)
-// record_repayment(loan_id: u32, amount: u64)    — tracks principal + interest portions
-// distribute_interest(loan_id: u32)               — pro-rata interest to lenders on repayment
-// get_loan_status(loan_id: u32)
-// --- Milestone Proofs ---
-// submit_proof(loan_id: u32, tranche_id: u32, proof_hash: u64)
-// approve_proof(loan_id: u32, tranche_id: u32)   — circle member approval (increments count)
-// get_tranche_status(loan_id: u32, tranche_id: u32)
-// --- Borrower ---
-// get_borrower_tier(addr_hash: u32)
-// upgrade_tier(addr_hash: u32)
-// get_active_loans()
+// deposit(amount: u64)              — add to vault_total and vault_member_{hash}
+// withdraw(amount: u64)             — subtract from vault_total and vault_member_{hash}
+// get_vault_total()                 — returns vault_total (truncated to i32 for return type)
+// get_lender_balance(addr_hash: u32) — returns vault_member_{hash} balance
 ```
 
+**Note on i32 return type**: XRPL contract functions return `i32`. For `get_vault_total()` and `get_lender_balance()`, store amounts in units of cents (not fractions) so u32 precision covers up to ~$21M — sufficient for Devnet demo.
+
 Cargo.toml mirrors `packages/bedrock/contract/Cargo.toml` exactly (same dependencies, same release profile).
+
+**SQLite tables handle everything else** (see `lib/db.js`).
 
 ---
 
@@ -516,7 +488,7 @@ The app renders different views based on user role (stored in local state + on-c
 |------|--------------|-----------------|
 | **Customer** | `/directory`, `/rewards`, `/rewards/redeem` | Zero — sees "points" and "card payment" only |
 | **Business Owner** | `/business/register`, `/business/dashboard`, `/directory` | Zero — sees USD balances in dashboard (custodial), no wallet needed |
-| **Community Lender** | `/vault`, `/lending`, `/lending/[circleId]` | Full — connects wallet, interacts with XRPL directly |
+| **Community Lender** | `/vault`, `/lending`, `/lending/[circleId]` | Zero — pays by card, sees USD balances and earned interest in dashboard |
 
 ### F2. Page Structure
 
@@ -534,7 +506,7 @@ The app renders different views based on user role (stored in local state + on-c
 
 **Business Dashboard (`/business/dashboard`)** — Revenue stats (total USD earned, custodial balance), customer count, points redeemed at your business, "Withdraw" button (→ Stripe Connect payout), optional "Boost Visibility" purchase.
 
-**SAV Vault (`/vault`)** — Lender-only view. Shows total pooled capital, active loans, repayment health, earned interest. Deposit/withdraw RLUSD (principal + interest) forms. Requires wallet connection. Uses `WalletConnector` web component from existing app.
+**SAV Vault (`/vault`)** — Lender-only view. Shows total pooled capital, active loans, repayment health, earned interest. Deposit via Stripe card form. Dashboard shows contribution, earned interest, withdrawal balance.
 
 **Lending Circles (`/lending`)** — Browse/create circles. Join a forming circle. View active loans per circle.
 
@@ -543,16 +515,12 @@ The app renders different views based on user role (stored in local state + on-c
 ### F3. Key Components
 
 **Copied from `apps/web/` (reused as-is):**
-- `WalletProvider.js` — from `apps/web/components/providers/WalletProvider.js`
-- `useWalletManager.js` — from `apps/web/hooks/useWalletManager.js` (change network to "devnet")
-- `useWalletConnector.js` — from `apps/web/hooks/useWalletConnector.js`
-- `WalletConnector.js` — from `apps/web/components/WalletConnector.js`
 - `next.config.js` — from `apps/web/next.config.js` (same polyfills)
 
 **New components:**
 
 Layout:
-- `Header.js` — "Black Business Support" branding, nav links, role switcher, conditional WalletConnector (only for lenders)
+- `Header.js` — "Black Business Support" branding, nav links, role switcher
 - `Sidebar.js` — Role-based navigation
 
 Directory:
@@ -571,10 +539,10 @@ Business:
 - `RevenueDashboard.js` — USD revenue stats (from custodial ledger), customer metrics, withdraw button
 - `BoostVisibilityForm.js` — Optional ad purchase
 
-Vault (lender-facing, crypto-aware):
+Vault (lender-facing):
 - `VaultOverview.js` — Total pooled, health metrics, charts
-- `VaultDepositForm.js` — RLUSD deposit amount input, wallet sign
-- `VaultWithdrawForm.js` — Withdrawal request
+- `VaultDepositForm.js` — Dollar amount input + Stripe card form
+- `VaultWithdrawForm.js` — Withdrawal request (platform balance / Stripe Connect payout)
 - `LenderDashboard.js` — Personal contribution, earned interest, funded loans, impact tracking
 
 Lending (lender/borrower-facing):
@@ -584,14 +552,13 @@ Lending (lender/borrower-facing):
 - `TrancheProgress.js` — Visual milestone tracker per loan (pending → proof submitted → approved → released)
 - `ProofUpload.js` — Borrower uploads milestone proof (receipt, invoice, photo, etc.)
 - `ProofReview.js` — Circle member reviews submitted proof and approves/rejects
-- `RepaymentForm.js` — RLUSD repayment to vault (principal + interest)
+- `RepaymentForm.js` — Stripe card repayment form (principal + interest)
 - `TierIndicator.js` — Graduated access tier visualization (Micro → Small → Medium)
 
 ### F4. State Management
 
 Same React Context pattern as existing app:
 
-- `WalletProvider` (copied) — wallet connection state for lenders
 - `AuthProvider` (new) — pseudonymous auth, user role, session
 - `AppProvider` (new) — platform config (MPT IDs, contract addresses), XRPL client
 
@@ -638,12 +605,12 @@ The central pooling and routing mechanism. Community contributions flow in, vett
 
 ### Phase 1: Project Scaffolding
 1. Create `apps/black-business/` with `package.json`, `next.config.js` (copy polyfills from `apps/web/next.config.js`), `tailwind.config.js`
-2. Copy wallet infra: `WalletProvider.js`, `useWalletManager.js`, `useWalletConnector.js`, `WalletConnector.js` from `apps/web/`
+2. Dependencies: next, react, xrpl, tailwindcss, stripe, @stripe/stripe-js, @stripe/react-stripe-js
 3. Create `app/layout.js` with providers, `app/page.js` landing page, `Header.js` with navigation
 4. Create `lib/networks.js` (copy from `apps/web/lib/networks.js`, set default to Devnet)
 5. Create `lib/constants.js` (placeholder contract addresses, MPT IDs)
 6. Create platform wallet initialization script using `client.fundWallet()` pattern from `xrpl-js-python-simple-scripts/js/generate.js`
-7. Verify: `pnpm --filter black-business dev` runs, wallet connects on Devnet
+7. Verify: `pnpm --filter black-business dev` runs, landing page loads
 
 ### Phase 2: RLUSD + MPT Platform Setup
 1. Create init script: generate platform wallets (master, vault, rewards pool) using Devnet faucet
@@ -673,30 +640,29 @@ The central pooling and routing mechanism. Community contributions flow in, vett
 8. Build `api/loyalty/redeem/route.js` — MPT→RLUSD swap
 9. Verify: customer pays by card → business receives RLUSD → customer sees points → redeems points
 
-### Phase 5: Vault Smart Contract
+### Phase 5: Vault Smart Contract + SQLite Setup
 1. Create `packages/bedrock/vault-contract/` with `Cargo.toml` (mirror existing contract's dependencies)
-2. Implement vault state functions: `deposit()`, `withdraw()`, `get_vault_total()`, `get_lender_balance()`
-3. Implement circle functions: `create_circle()`, `join_circle()`, `get_circle_status()`
-4. Implement loan tracking: `request_loan()`, `record_disbursement()`, `record_repayment()`, `get_borrower_tier()`, `upgrade_tier()`
-5. Implement milestone proof functions: `submit_proof()`, `approve_proof()`, `get_tranche_status()`
-6. Implement interest tracking: `distribute_interest()` — pro-rata interest allocation to lenders on repayment
-7. Build: `cargo build --release --target wasm32-unknown-unknown`
-8. Deploy to Devnet (or AlphaNet if smart contracts not on Devnet)
+2. Implement **4 functions only**: `deposit()`, `withdraw()`, `get_vault_total()`, `get_lender_balance()` — same read-modify-write pattern as counter contract
+3. Build: `cargo build --release --target wasm32-unknown-unknown`
+4. Deploy to Devnet (or AlphaNet if smart contracts not on Devnet)
+5. Create `lib/db.js` — `better-sqlite3` connection singleton, runs schema on first boot
+6. SQLite schema — tables: `businesses`, `circles`, `circle_members`, `loans`, `tranches`, `proofs`, `proof_approvals`, `borrower_tiers`, `points_ledger`, `lender_interest`
+7. Add `blackbusiness.db` to `.gitignore`
 
 ### Phase 6: SAV Vault Frontend (Lender Flow)
 1. Build `api/vault/deposit/route.js`, `api/vault/withdraw/route.js`, `api/vault/status/route.js`
 2. Build `useVault()` hook
 3. Build `/vault` page with `VaultOverview.js`, `VaultDepositForm.js`, `VaultWithdrawForm.js`
 4. Build `LenderDashboard.js` — contribution tracking, earned interest display, impact metrics
-5. Verify: lender deposits RLUSD → vault total increases → lender can withdraw principal + interest
+5. Verify: lender deposits via Stripe test card → vault total increases → lender can withdraw (balance updated in dashboard)
 
 ### Phase 7: Lending Circles + Microloans (Borrower Flow)
-1. Build `api/lending/apply/route.js` — loan application with graduated tier check, interest rate calculation, tranche splitting
-2. Build `api/lending/disburse/route.js` — create milestone escrows using `EscrowCreate` + conditions + `CancelAfter` deadline from `escrow.js`
-3. Build `api/lending/submit-proof/route.js` — borrower uploads milestone proof (receipt, invoice, photo)
-4. Build `api/lending/approve-proof/route.js` — circle member reviews and approves proof → on threshold met, `EscrowFinish` releases tranche
-5. Build `api/lending/repay/route.js` — process repayment (principal + interest), distribute interest pro-rata to lenders
-6. Build credential issuance for circle membership — pattern from `credentials.js` lines 174-249
+1. Build `api/lending/apply/route.js` — check tier from SQLite `borrower_tiers`, check vault capital via `ContractCall` to `get_vault_total()`, insert into SQLite `loans` + `tranches`, calculate interest in JS
+2. Build `api/lending/disburse/route.js` — create milestone escrow using `EscrowCreate` + conditions + `CancelAfter` deadline from `escrow.js`; store escrow ID in SQLite `tranches`
+3. Build `api/lending/submit-proof/route.js` — insert into SQLite `proofs`, update `tranches` status to `proof_submitted`
+4. Build `api/lending/approve-proof/route.js` — insert into SQLite `proof_approvals`; if threshold met in JS, call `EscrowFinish` on XRPL, update SQLite `tranches` to `released`
+5. Build `api/lending/repay/route.js` — Stripe card payment → platform converts to RLUSD → Payment to vault on XRPL; update SQLite `loans`, `lender_interest`; upgrade `borrower_tiers` in SQLite; call `ContractCall` `deposit()`
+6. Build credential issuance for circle membership — pattern from `credentials.js` lines 174-249 (on-chain, XRPL)
 7. Build `useLendingCircle()` hook
 8. Build `/lending` page with `CircleList.js`
 9. Build `/lending/[circleId]` with `CircleDetail.js`, `LoanRequestForm.js`, `TrancheProgress.js`, `RepaymentForm.js`, `ProofUpload.js`, `ProofReview.js`
@@ -728,23 +694,23 @@ The central pooling and routing mechanism. Community contributions flow in, vett
 6. Redeem points at `/rewards/redeem` → verify business receives RLUSD
 
 ### Test Flow 2: Lender Deposits & Withdraws
-1. Connect wallet on `/vault`
-2. Deposit RLUSD to SAV
+1. Go to `/vault` as lender
+2. Deposit $500 via Stripe test card
 3. Verify vault total updated
 4. Withdraw contribution
-5. Verify RLUSD returned to lender wallet
+5. Verify withdrawal balance updated in dashboard
 
 ### Test Flow 3: Full Lending Cycle (Proof-Gated Milestones + Interest)
 1. Create lending circle with 4 test wallets
 2. All members accept circle membership credentials
-3. Deposit RLUSD into vault as lenders (e.g. $5,000 total)
+3. Deposit $5,000 into vault via Stripe test card as lenders
 4. Borrower requests microloan of $3,000 (Tier 1: micro, 3 tranches × $1,000, 5% interest)
 5. Verify first tranche escrow created (with CancelAfter deadline)
 6. Borrower submits proof for tranche 1 (e.g. equipment receipt)
 7. 2 of 4 circle members approve proof
 8. Verify escrow released → borrower receives $1,000
 9. Repeat proof→approve→release for tranche 2 and 3
-10. Borrower repays $3,150 ($3,000 principal + $150 interest)
+10. Borrower repays $3,150 via Stripe card ($3,000 principal + $150 interest)
 11. Verify interest distributed pro-rata to lenders
 12. Verify lender can withdraw principal + earned interest share
 13. Verify borrower tier upgraded to Tier 2
@@ -761,8 +727,6 @@ These are ready to use as-is or as reference patterns:
 | Asset | Location | Status |
 |-------|----------|--------|
 | **Next.js 14 scaffold app** | `apps/web/` | Working — copy structure for new app |
-| **Wallet connection (xrpl-connect)** | `apps/web/components/providers/WalletProvider.js`, `apps/web/hooks/useWalletManager.js`, `apps/web/hooks/useWalletConnector.js` | Working — copy directly |
-| **WalletConnector web component** | `apps/web/components/WalletConnector.js` | Working — copy directly |
 | **Tailwind CSS config** | `apps/web/tailwind.config.js`, `apps/web/globals.css` | Working — extend with new colors |
 | **Node.js polyfills (webpack)** | `apps/web/next.config.js` | Working — copy directly |
 | **Network config** | `apps/web/lib/networks.js` | Working — copy, change default to Devnet |
@@ -784,16 +748,16 @@ These are ready to use as-is or as reference patterns:
 
 **Build**:
 - [ ] `apps/black-business/` — New Next.js app (scaffold from `apps/web/`)
-- [ ] `apps/black-business/package.json` — Dependencies: next, react, xrpl, xrpl-connect, tailwindcss, stripe
-- [ ] Copy + adapt: `next.config.js`, `tailwind.config.js`, `WalletProvider.js`, wallet hooks
+- [ ] `apps/black-business/package.json` — Dependencies: next, react, xrpl, tailwindcss, stripe, @stripe/stripe-js, @stripe/react-stripe-js
+- [ ] Copy + adapt: `next.config.js`, `tailwind.config.js`
 - [ ] `lib/networks.js` — Devnet as default
 - [ ] `lib/constants.js` — Platform config placeholders
 - [ ] `scripts/init-platform.js` — Generate + fund platform wallets on Devnet (uses `client.fundWallet()`)
 - [ ] `app/layout.js` — Root layout with providers
 - [ ] `app/page.js` — Landing page with three CTA buttons
-- [ ] `components/layout/Header.js` — Navigation + conditional wallet connector
+- [ ] `components/layout/Header.js` — Navigation + role switcher
 
-**Verify**: `pnpm --filter black-business dev` runs, landing page loads, wallet connects on Devnet.
+**Verify**: `pnpm --filter black-business dev` runs, landing page loads, Stripe Elements render in test mode.
 
 ### PHASE 2: RLUSD + MPT Token Infrastructure
 **Goal**: Platform accounts have RLUSD trustlines and a loyalty MPT token exists on Devnet. After this phase, the platform can send/receive RLUSD (the stablecoin used for all money flows) and mint/transfer BBS loyalty points (the MPT token customers earn).
@@ -824,7 +788,7 @@ These are ready to use as-is or as reference patterns:
 **Goal**: Customers pay by card, businesses receive RLUSD, customers earn and redeem points.
 
 **Build**:
-- [ ] `lib/stripe/config.js` — Stripe client + server setup
+- [ ] `lib/stripe/config.js` — Stripe publishable key (frontend Elements) + secret key (backend API). Used by customer checkout, lender deposits, and borrower repayments.
 - [ ] `app/api/payments/checkout/route.js` — Create Stripe PaymentIntent
 - [ ] `app/api/payments/webhook/route.js` — Handle payment success → RLUSD to business + MPT to customer
 - [ ] `app/api/loyalty/mint/route.js` — Mint MPT points after purchase
@@ -837,19 +801,22 @@ These are ready to use as-is or as reference patterns:
 
 **Verify**: Full customer loop — pay by card → check RLUSD arrived to business → check points balance → redeem points.
 
-### PHASE 5: Vault Smart Contract
-**Goal**: On-chain state tracking for the SAV, lending circles, and loan history.
+### PHASE 5: Vault Smart Contract + SQLite Setup
+**Goal**: 4-function vault contract on-chain for transparency; SQLite for all application state.
 
 **Build**:
-- [ ] `packages/bedrock/vault-contract/Cargo.toml`
-- [ ] `packages/bedrock/vault-contract/src/lib.rs` — All vault/circle/loan functions
+- [ ] `packages/bedrock/vault-contract/Cargo.toml` — mirror existing contract dependencies
+- [ ] `packages/bedrock/vault-contract/src/lib.rs` — 4 functions only: `deposit()`, `withdraw()`, `get_vault_total()`, `get_lender_balance()`
 - [ ] `packages/bedrock/vault-contract/abi.json`
 - [ ] Build + deploy to Devnet/AlphaNet
+- [ ] `lib/db.js` — `better-sqlite3` singleton, schema auto-runs on boot
+- [ ] SQLite schema: `businesses`, `circles`, `circle_members`, `loans`, `tranches`, `proofs`, `proof_approvals`, `borrower_tiers`, `points_ledger`, `lender_interest`
+- [ ] Add `blackbusiness.db` to `.gitignore`
 
-**Verify**: Call each contract function via `ContractCall` and check state persistence.
+**Verify**: Call `deposit()` and `get_vault_total()` via `ContractCall`, confirm state persists. Confirm SQLite file created and tables exist on app boot.
 
 ### PHASE 6: SAV Vault Frontend (Lender Flow)
-**Goal**: Community lenders can deposit RLUSD, track vault health, see earned interest, and withdraw.
+**Goal**: Community lenders can deposit via Stripe, track vault health, see earned interest, and withdraw.
 
 **Build**:
 - [ ] `app/api/vault/deposit/route.js`, `withdraw/route.js`, `status/route.js`
@@ -857,17 +824,18 @@ These are ready to use as-is or as reference patterns:
 - [ ] `components/vault/LenderDashboard.js` — shows contribution, earned interest, funded loans
 - [ ] `hooks/useVault.js`
 
-**Verify**: Deposit RLUSD → vault total increases → withdraw → RLUSD returned (principal + earned interest).
+**Verify**: Deposit via Stripe test card → vault total increases → withdraw → balance updated in dashboard (principal + earned interest).
 
 ### PHASE 7: Lending Circles + Microloans
-**Goal**: Borrowers join circles, request loans disbursed in proof-gated milestone tranches, repay with interest that flows back to lenders.
+**Goal**: Borrowers join circles, request loans disbursed in proof-gated milestone tranches, repay with interest that flows back to lenders. Circle/loan/proof/tier state in SQLite; XRPL handles credentials and escrows.
 
 **Build**:
-- [ ] `app/api/lending/apply/route.js`, `disburse/route.js`, `repay/route.js`
-- [ ] `app/api/lending/submit-proof/route.js` — borrower uploads milestone proof
-- [ ] `app/api/lending/approve-proof/route.js` — circle members review & approve proof → triggers escrow release
-- [ ] Circle credential issuance (CredentialCreate + CredentialAccept + DepositPreauth)
-- [ ] Milestone escrow creation (EscrowCreate with conditions + CancelAfter deadline) + release (EscrowFinish with fulfillment on proof approval)
+- [ ] `app/api/lending/apply/route.js` — tier check from SQLite, vault check via `ContractCall`, insert into SQLite `loans` + `tranches`
+- [ ] `app/api/lending/disburse/route.js` — `EscrowCreate` on XRPL, store escrow ID in SQLite `tranches`
+- [ ] `app/api/lending/submit-proof/route.js` — insert into SQLite `proofs`, update `tranches` status
+- [ ] `app/api/lending/approve-proof/route.js` — insert into SQLite `proof_approvals`; on threshold met, `EscrowFinish` on XRPL, update SQLite
+- [ ] `app/api/lending/repay/route.js` — Stripe card payment → platform converts to RLUSD → Payment to vault on XRPL; update SQLite `loans`, `lender_interest`, `borrower_tiers`; call contract `deposit()`
+- [ ] Circle credential issuance (CredentialCreate + CredentialAccept + DepositPreauth) — XRPL
 - [ ] `app/lending/page.js` + `components/lending/CircleList.js`
 - [ ] `app/lending/[circleId]/page.js` + `CircleDetail.js`, `LoanRequestForm.js`, `TrancheProgress.js`, `RepaymentForm.js`, `ProofUpload.js`, `ProofReview.js`
 - [ ] `components/lending/TierIndicator.js`
@@ -908,7 +876,5 @@ These are ready to use as-is or as reference patterns:
 - `xrpl-js-python-simple-scripts/devnet/credentials.js` — On-chain credentials + deposit preauth
 - `xrpl-js-python-simple-scripts/devnet/batch.js` — Atomic batch transactions
 - `packages/bedrock/contract/src/lib.rs` — Smart contract pattern (get_data/set_data, no_mangle extern C)
-- `apps/web/components/ContractInteraction.js` — Frontend ContractCall pattern
-- `apps/web/components/providers/WalletProvider.js` — React Context wallet state
-- `apps/web/hooks/useWalletManager.js` — Wallet adapter initialization
+- `apps/web/components/ContractInteraction.js` — Backend ContractCall pattern (server-side only)
 - `apps/web/next.config.js` — Required Node.js polyfills for browser
