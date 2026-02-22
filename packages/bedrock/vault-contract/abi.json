@@ -1,0 +1,43 @@
+{
+  "contract": "vault-contract",
+  "version": "0.1.0",
+  "functions": [
+    {
+      "name": "deposit",
+      "description": "Add RLUSD to vault total and lender's balance. Amount in cents.",
+      "params": [
+        { "name": "amount", "type": "u32", "description": "Deposit amount in cents (1 = $0.01)" },
+        { "name": "addr_hash", "type": "u32", "description": "Hash of lender's address for per-lender tracking" }
+      ],
+      "returns": "i32 — new vault total (truncated), or -1 on error"
+    },
+    {
+      "name": "withdraw",
+      "description": "Remove RLUSD from vault total and lender's balance. Amount in cents.",
+      "params": [
+        { "name": "amount", "type": "u32", "description": "Withdrawal amount in cents" },
+        { "name": "addr_hash", "type": "u32", "description": "Hash of lender's address" }
+      ],
+      "returns": "i32 — new vault total (truncated), or -1 on error"
+    },
+    {
+      "name": "get_vault_total",
+      "description": "Returns total RLUSD pooled in the vault, in cents.",
+      "params": [],
+      "returns": "i32 — vault total (truncated to i32)"
+    },
+    {
+      "name": "get_lender_balance",
+      "description": "Returns a specific lender's contribution balance, in cents.",
+      "params": [
+        { "name": "addr_hash", "type": "u32", "description": "Hash of lender's address" }
+      ],
+      "returns": "i32 — lender balance (truncated to i32)"
+    }
+  ],
+  "storage": {
+    "vault_total": { "type": "u64", "description": "Total RLUSD pooled (cents)" },
+    "vault_members": { "type": "u32", "description": "Number of active lenders" },
+    "vm_{hash}": { "type": "u64", "description": "Per-lender balance (cents), keyed by address hash" }
+  }
+}
