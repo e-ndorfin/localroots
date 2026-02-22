@@ -1,73 +1,62 @@
-const { NextResponse } = require("next/server");
-const { getDb } = require("../../../../lib/db");
+import { NextResponse } from "next/server";
+import { createClient } from "@/lib/supabase/server";
 
 /**
  * GET /api/business/directory?category=&search=
  *
+ * Public route — no auth required.
  * Returns all registered businesses, optionally filtered by category and/or
  * search term (matches name or description). Boosted businesses sort first.
  */
 export async function GET(request) {
   try {
+    const supabase = await createClient();
     const { searchParams } = new URL(request.url);
     const category = searchParams.get("category");
     const search = searchParams.get("search");
 
-    const db = await getDb();
-
-    let query = `SELECT id, name, category, location, description, owner_pseudonym,
-                        balance_cents, is_boosted, created_at
-                 FROM businesses`;
-    const conditions = [];
-    const params = [];
+    let query = supabase
+      .from("businesses")
+      .select(
+        "id, name, category, location, description, owner_user_id, balance_cents, is_boosted, lat, lng, created_at"
+      );
 
     if (category) {
-      conditions.push("category = ?");
-      params.push(category);
+      query = query.eq("category", category);
     }
 
     if (search) {
-      conditions.push("(name LIKE ? OR description LIKE ?)");
-      const pattern = `%${search}%`;
-      params.push(pattern, pattern);
+      query = query.or(`name.ilike.%${search}%,description.ilike.%${search}%`);
     }
 
-    if (conditions.length) {
-      query += " WHERE " + conditions.join(" AND ");
-    }
+    query = query
+      .order("is_boosted", { ascending: false })
+      .order("created_at", { ascending: false });
 
-    // Boosted businesses first, then by creation date (newest first)
-    query += " ORDER BY is_boosted DESC, created_at DESC";
+    const { data, error } = await query;
+    if (error) throw error;
 
-    const stmt = db.prepare(query);
-    if (params.length) {
-      stmt.bind(params);
-    }
-
-    const businesses = [];
-    while (stmt.step()) {
-      const row = stmt.getAsObject();
-      businesses.push({
-        id: row.id,
-        name: row.name,
-        category: row.category,
-        location: row.location,
-        description: row.description,
-        ownerPseudonym: row.owner_pseudonym,
-        balanceCents: row.balance_cents,
-        isBoosted: !!row.is_boosted,
-        createdAt: row.created_at,
-      });
-    }
-    stmt.free();
+    const businesses = data.map((row) => ({
+      id: row.id,
+      name: row.name,
+      category: row.category,
+      location: row.location,
+      description: row.description,
+      ownerUserId: row.owner_user_id,
+      balanceCents: row.balance_cents,
+      isBoosted: row.is_boosted,
+      lat: row.lat,
+      lng: row.lng,
+      createdAt: row.created_at,
+    }));
 
     // Get distinct categories for filter UI
-    const catResult = db.exec("SELECT DISTINCT category FROM businesses ORDER BY category");
-    const categories = catResult.length ? catResult[0].values.map((r) => r[0]) : [];
+    const { data: catData } = await supabase.from("businesses").select("category");
+    const categories = [...new Set(catData.map((r) => r.category))].sort();
 
     return NextResponse.json({ businesses, categories });
-  } catch (error) {
-    console.error("Directory query error:", error);
-    return NextResponse.json({ error: error.message }, { status: 500 });
+  } catch (err) {
+    const status = err.status || 500;
+    return NextResponse.json({ error: err.message || "Internal server error" }, { status });
   }
 }

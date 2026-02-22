@@ -2,19 +2,50 @@
 
 import Link from "next/link";
 import { useRouter } from "next/navigation";
+import { useState } from "react";
+import { createClient } from "@/lib/supabase/client";
 
 export default function CreateAccountPage() {
   const router = useRouter();
+  const [error, setError] = useState("");
+  const [loading, setLoading] = useState(false);
 
-  function handleSubmit(event) {
-    event.preventDefault();
-    const form = event.target;
-    const name = form.querySelector('input[type="text"]')?.value || "";
-    const email = form.querySelector('input[type="email"]')?.value || "";
-    const pseudonym = email || name.toLowerCase().replace(/\s+/g, "-") || "customer-" + Date.now();
-    window.localStorage.setItem("bb-role", "customer");
-    window.localStorage.setItem("bb-pseudonym", pseudonym);
+  async function handleSubmit(e) {
+    e.preventDefault();
+    setError("");
+    setLoading(true);
+
+    const formData = new FormData(e.target);
+    const name = formData.get("name");
+    const email = formData.get("email");
+    const password = formData.get("password");
+
+    const supabase = createClient();
+    const { data, error: authError } = await supabase.auth.signUp({
+      email,
+      password,
+      options: {
+        data: { role: "customer", display_name: name },
+      },
+    });
+
+    if (authError) {
+      setError(authError.message);
+      setLoading(false);
+      return;
+    }
+
+    // Insert profile row
+    if (data.user) {
+      await supabase.from("profiles").insert({
+        id: data.user.id,
+        role: "customer",
+        display_name: name,
+      });
+    }
+
     router.push("/directory");
+    router.refresh();
   }
 
   return (
@@ -28,20 +59,24 @@ export default function CreateAccountPage() {
           <h1>Create account</h1>
           <p className="muted">Set up your profile to discover and support local businesses.</p>
 
+          {error && <p className="text-red-500 text-sm mb-2">{error}</p>}
+
           <form className="login-form" noValidate onSubmit={handleSubmit}>
             <label>
               Full name
-              <input type="text" placeholder="Your full name" />
+              <input type="text" name="name" placeholder="Your full name" />
             </label>
             <label>
               Email
-              <input type="email" placeholder="you@email.com" />
+              <input type="email" name="email" placeholder="you@email.com" />
             </label>
             <label>
               Password
-              <input type="password" placeholder="Create a password" />
+              <input type="password" name="password" placeholder="Create a password" />
             </label>
-            <button className="btn btn-solid" type="submit">Create Account</button>
+            <button className="btn btn-solid" type="submit" disabled={loading}>
+              {loading ? "Creating..." : "Create Account"}
+            </button>
           </form>
 
           <p className="signup-note">

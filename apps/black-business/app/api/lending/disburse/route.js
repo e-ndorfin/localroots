@@ -1,28 +1,28 @@
-const { getDb, persist } = require("../../../../lib/db");
-const { NextResponse } = require("next/server");
+import { NextResponse } from "next/server";
+import { createClient } from "@/lib/supabase/server";
+import { requireAuth } from "@/lib/supabase/auth";
 
 export async function POST(request) {
   try {
+    await requireAuth();
     const { trancheId } = await request.json();
 
     if (!trancheId) {
       return NextResponse.json({ error: "trancheId required" }, { status: 400 });
     }
 
-    const db = await getDb();
+    const supabase = await createClient();
 
     // Find tranche
-    const trancheRows = db.exec("SELECT * FROM tranches WHERE id = ?", [trancheId]);
-    if (!trancheRows.length || !trancheRows[0].values.length) {
+    const { data: tranche, error: findError } = await supabase
+      .from("tranches")
+      .select("*")
+      .eq("id", trancheId)
+      .single();
+
+    if (findError) {
       return NextResponse.json({ error: "Tranche not found" }, { status: 404 });
     }
-
-    const trancheCols = trancheRows[0].columns;
-    const trancheVals = trancheRows[0].values[0];
-    const tranche = {};
-    trancheCols.forEach((col, idx) => {
-      tranche[col] = trancheVals[idx];
-    });
 
     if (tranche.status !== "pending") {
       return NextResponse.json(
@@ -31,28 +31,35 @@ export async function POST(request) {
       );
     }
 
-    // Update tranche status to 'locked'
-    db.run("UPDATE tranches SET status = 'locked' WHERE id = ?", [trancheId]);
+    // Update tranche to locked
+    const { error: updateError } = await supabase
+      .from("tranches")
+      .update({ status: "locked" })
+      .eq("id", trancheId);
 
-    // Update parent loan status to 'active' if not already
-    db.run(
-      "UPDATE loans SET status = 'active', updated_at = datetime('now') WHERE id = ? AND status != 'active'",
-      [tranche.loan_id]
-    );
+    if (updateError) throw updateError;
 
-    persist(db);
+    // Update parent loan to active (only if not already active)
+    const { error: loanError } = await supabase
+      .from("loans")
+      .update({ status: "active", updated_at: new Date().toISOString() })
+      .eq("id", tranche.loan_id)
+      .neq("status", "active");
 
-    // Fetch updated tranche
-    const updatedRows = db.exec("SELECT * FROM tranches WHERE id = ?", [trancheId]);
-    const updatedCols = updatedRows[0].columns;
-    const updatedVals = updatedRows[0].values[0];
-    const updatedTranche = {};
-    updatedCols.forEach((col, idx) => {
-      updatedTranche[col] = updatedVals[idx];
-    });
+    if (loanError) throw loanError;
+
+    // Fetch and return updated tranche
+    const { data: updatedTranche, error: fetchError } = await supabase
+      .from("tranches")
+      .select("*")
+      .eq("id", trancheId)
+      .single();
+
+    if (fetchError) throw fetchError;
 
     return NextResponse.json({ tranche: updatedTranche });
   } catch (err) {
-    return NextResponse.json({ error: err.message }, { status: 500 });
+    const status = err.status || 500;
+    return NextResponse.json({ error: err.message || "Internal server error" }, { status });
   }
 }

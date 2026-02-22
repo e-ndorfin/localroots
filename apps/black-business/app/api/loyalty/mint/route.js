@@ -1,41 +1,53 @@
-const { NextResponse } = require("next/server");
-const { getDb, persist } = require("../../../../lib/db");
+import { NextResponse } from "next/server";
+import { createClient } from "@/lib/supabase/server";
+import { requireAuth } from "@/lib/supabase/auth";
 
-async function POST(request) {
+/**
+ * POST /api/loyalty/mint
+ *
+ * Mints loyalty points for the authenticated user.
+ * Body: { points }
+ */
+export async function POST(request) {
   try {
-    const { customerPseudonym, points } = await request.json();
+    const user = await requireAuth();
+    const supabase = await createClient();
 
-    if (!customerPseudonym || !points || points <= 0) {
+    const { points, businessId, description } = await request.json();
+
+    if (!points || points <= 0) {
       return NextResponse.json(
-        { error: "Missing or invalid fields: customerPseudonym, points (must be > 0)" },
+        { error: "Missing or invalid field: points (must be > 0)" },
         { status: 400 }
       );
     }
 
-    const db = await getDb();
+    // Insert earn entry
+    const entry = {
+      customer_user_id: user.id,
+      type: "earn",
+      points,
+      description: description || "Manual mint",
+    };
+    if (businessId) entry.business_id = businessId;
 
-    db.run(
-      "INSERT INTO points_ledger (customer_pseudonym, type, points, description) VALUES (?, 'earn', ?, 'Manual mint')",
-      [customerPseudonym, points]
-    );
+    const { error: insertError } = await supabase.from("points_ledger").insert(entry);
 
-    persist(db);
+    if (insertError) throw insertError;
 
     // Calculate total balance
-    const result = db.exec(
-      "SELECT COALESCE(SUM(points), 0) AS balance FROM points_ledger WHERE customer_pseudonym = ?",
-      [customerPseudonym]
-    );
-    const balance = result.length ? result[0].values[0][0] : 0;
+    const { data: rows, error: balanceError } = await supabase
+      .from("points_ledger")
+      .select("points")
+      .eq("customer_user_id", user.id);
+
+    if (balanceError) throw balanceError;
+
+    const balance = rows.reduce((sum, row) => sum + row.points, 0);
 
     return NextResponse.json({ balance });
   } catch (err) {
-    console.error("POST /api/loyalty/mint error:", err);
-    return NextResponse.json(
-      { error: err.message || "Internal server error" },
-      { status: 500 }
-    );
+    const status = err.status || 500;
+    return NextResponse.json({ error: err.message || "Internal server error" }, { status });
   }
 }
-
-module.exports = { POST };

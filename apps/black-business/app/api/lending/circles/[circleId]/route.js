@@ -1,60 +1,45 @@
-const { getDb } = require("../../../../../lib/db");
-const { NextResponse } = require("next/server");
+import { NextResponse } from "next/server";
+import { createClient } from "@/lib/supabase/server";
+import { requireAuth } from "@/lib/supabase/auth";
 
 export async function GET(request, { params }) {
   try {
+    await requireAuth();
     const { circleId } = await params;
-    const db = await getDb();
+    const supabase = await createClient();
 
     // Fetch circle
-    const circleRows = db.exec("SELECT * FROM circles WHERE id = ?", [circleId]);
-    if (!circleRows.length || !circleRows[0].values.length) {
+    const { data: circle, error: circleError } = await supabase
+      .from("circles")
+      .select("*")
+      .eq("id", circleId)
+      .single();
+
+    if (circleError) {
       return NextResponse.json({ error: "Circle not found" }, { status: 404 });
     }
 
-    const circleCols = circleRows[0].columns;
-    const circleVals = circleRows[0].values[0];
-    const circle = {};
-    circleCols.forEach((col, idx) => {
-      circle[col] = circleVals[idx];
-    });
-
     // Fetch members
-    const memberRows = db.exec(
-      "SELECT * FROM circle_members WHERE circle_id = ? ORDER BY joined_at",
-      [circleId]
-    );
-    const members = [];
-    if (memberRows.length && memberRows[0].values.length) {
-      const memberCols = memberRows[0].columns;
-      memberRows[0].values.forEach((row) => {
-        const member = {};
-        memberCols.forEach((col, idx) => {
-          member[col] = row[idx];
-        });
-        members.push(member);
-      });
-    }
+    const { data: membersData, error: membersError } = await supabase
+      .from("circle_members")
+      .select("*")
+      .eq("circle_id", circleId)
+      .order("joined_at");
+
+    if (membersError) throw membersError;
 
     // Fetch loans
-    const loanRows = db.exec(
-      "SELECT * FROM loans WHERE circle_id = ? ORDER BY created_at DESC",
-      [circleId]
-    );
-    const loans = [];
-    if (loanRows.length && loanRows[0].values.length) {
-      const loanCols = loanRows[0].columns;
-      loanRows[0].values.forEach((row) => {
-        const loan = {};
-        loanCols.forEach((col, idx) => {
-          loan[col] = row[idx];
-        });
-        loans.push(loan);
-      });
-    }
+    const { data: loansData, error: loansError } = await supabase
+      .from("loans")
+      .select("*")
+      .eq("circle_id", circleId)
+      .order("created_at", { ascending: false });
 
-    return NextResponse.json({ circle, members, loans });
+    if (loansError) throw loansError;
+
+    return NextResponse.json({ circle, members: membersData, loans: loansData });
   } catch (err) {
-    return NextResponse.json({ error: err.message }, { status: 500 });
+    const status = err.status || 500;
+    return NextResponse.json({ error: err.message || "Internal server error" }, { status });
   }
 }

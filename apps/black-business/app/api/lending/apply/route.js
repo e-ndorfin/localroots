@@ -1,26 +1,31 @@
-const { getDb, persist, getVaultTotal } = require("../../../../lib/db");
-const { LOAN_INTEREST_RATE, LOAN_TIERS } = require("../../../../lib/constants");
-const { NextResponse } = require("next/server");
+import { NextResponse } from "next/server";
+import { createClient } from "@/lib/supabase/server";
+import { requireAuth } from "@/lib/supabase/auth";
+import { LOAN_INTEREST_RATE, LOAN_TIERS } from "@/lib/constants";
+import { getVaultTotal } from "@/lib/supabase/db";
 
 export async function POST(request) {
   try {
-    const { borrowerPseudonym, circleId, principalCents } = await request.json();
+    const user = await requireAuth();
+    const { circleId, principalCents } = await request.json();
 
-    if (!borrowerPseudonym || !circleId || !principalCents || principalCents <= 0) {
+    if (!circleId || !principalCents || principalCents <= 0) {
       return NextResponse.json(
-        { error: "borrowerPseudonym, circleId, and positive principalCents required" },
+        { error: "circleId and positive principalCents required" },
         { status: 400 }
       );
     }
 
-    const db = await getDb();
+    const supabase = await createClient();
 
     // Look up borrower tier (default to tier 1 if not found)
-    const tierRows = db.exec(
-      "SELECT tier FROM borrower_tiers WHERE borrower_pseudonym = ?",
-      [borrowerPseudonym]
-    );
-    const tier = tierRows.length && tierRows[0].values.length ? tierRows[0].values[0][0] : 1;
+    const { data: tierRow } = await supabase
+      .from("borrower_tiers")
+      .select("tier")
+      .eq("borrower_user_id", user.id)
+      .maybeSingle();
+
+    const tier = tierRow?.tier ?? 1;
 
     // Map tier to max principal
     const tierMaxMap = {
@@ -38,7 +43,7 @@ export async function POST(request) {
     }
 
     // Check vault capital
-    const vaultTotal = getVaultTotal(db);
+    const vaultTotal = await getVaultTotal();
     if (vaultTotal < principalCents) {
       return NextResponse.json(
         { error: `Insufficient vault capital: ${vaultTotal} available, ${principalCents} requested` },
@@ -50,39 +55,36 @@ export async function POST(request) {
     const totalRepaymentCents = Math.ceil(principalCents * (1 + LOAN_INTEREST_RATE));
 
     // Insert loan
-    db.run(
-      `INSERT INTO loans (circle_id, borrower_pseudonym, principal_cents, total_repayment_cents, num_tranches, status)
-       VALUES (?, ?, ?, ?, 3, 'pending')`,
-      [circleId, borrowerPseudonym, principalCents, totalRepaymentCents]
-    );
+    const { data: loan, error: loanError } = await supabase
+      .from("loans")
+      .insert({
+        circle_id: circleId,
+        borrower_user_id: user.id,
+        principal_cents: principalCents,
+        total_repayment_cents: totalRepaymentCents,
+        num_tranches: 3,
+        status: "pending",
+      })
+      .select()
+      .single();
 
-    // Get the inserted loan ID
-    const loanIdRows = db.exec("SELECT last_insert_rowid()");
-    const loanId = loanIdRows[0].values[0][0];
+    if (loanError) throw loanError;
 
     // Create 3 tranches
     const trancheAmount = Math.ceil(principalCents / 3);
-    for (let i = 0; i < 3; i++) {
-      db.run(
-        `INSERT INTO tranches (loan_id, tranche_index, amount_cents, status)
-         VALUES (?, ?, ?, 'pending')`,
-        [loanId, i, trancheAmount]
-      );
-    }
+    const tranches = Array.from({ length: 3 }, (_, i) => ({
+      loan_id: loan.id,
+      tranche_index: i,
+      amount_cents: trancheAmount,
+      status: "pending",
+    }));
 
-    persist(db);
-
-    // Fetch and return the loan record
-    const loanRows = db.exec("SELECT * FROM loans WHERE id = ?", [loanId]);
-    const columns = loanRows[0].columns;
-    const values = loanRows[0].values[0];
-    const loan = {};
-    columns.forEach((col, idx) => {
-      loan[col] = values[idx];
-    });
+    const { error: trancheError } = await supabase.from("tranches").insert(tranches);
+    if (trancheError) throw trancheError;
 
     return NextResponse.json({ loan });
   } catch (err) {
-    return NextResponse.json({ error: err.message }, { status: 500 });
+    const status = err.status || 500;
+    return NextResponse.json({ error: err.message || "Internal server error" }, { status });
   }
 }

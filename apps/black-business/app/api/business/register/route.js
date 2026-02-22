@@ -1,9 +1,10 @@
-const { NextResponse } = require("next/server");
-const { getDb, persist } = require("../../../../lib/db");
-const { getClient } = require("../../../../lib/xrpl/client");
-const { textToHex, submitTx } = require("../../../../lib/xrpl/helpers");
-const { PLATFORM_MASTER_ADDRESS } = require("../../../../lib/constants");
-const xrpl = require("xrpl");
+import { NextResponse } from "next/server";
+import { createClient } from "@/lib/supabase/server";
+import { requireAuth } from "@/lib/supabase/auth";
+import { getClient } from "@/lib/xrpl/client";
+import { textToHex, submitTx } from "@/lib/xrpl/helpers";
+import { PLATFORM_MASTER_ADDRESS } from "@/lib/constants";
+import * as xrpl from "xrpl";
 
 const CREDENTIAL_TYPE = textToHex("REGISTERED_BUSINESS");
 
@@ -12,47 +13,57 @@ const CREDENTIAL_TYPE = textToHex("REGISTERED_BUSINESS");
  *
  * Registers a new business:
  * 1. Validates input
- * 2. Inserts row into SQLite `businesses` table (custodial model)
+ * 2. Inserts row into Supabase `businesses` table (custodial model)
  * 3. Issues a REGISTERED_BUSINESS credential on XRPL (platform master → business owner)
  *
- * Body: { name, category, location?, description?, ownerPseudonym }
+ * Body: { name, category, location?, description? }
  */
 export async function POST(request) {
   try {
+    const user = await requireAuth();
+    const supabase = await createClient();
+
     const body = await request.json();
-    const { name, category, location, description, ownerPseudonym } = body;
+    const { name, category, location, description, lat, lng } = body;
 
     // Validate required fields
-    if (!name || !category || !ownerPseudonym) {
+    if (!name || !category) {
       return NextResponse.json(
-        { error: "name, category, and ownerPseudonym are required" },
+        { error: "name and category are required" },
         { status: 400 }
       );
     }
 
-    const db = await getDb();
-
     // Check if owner already registered a business
-    const existing = db.exec(
-      `SELECT id FROM businesses WHERE owner_pseudonym = '${ownerPseudonym.replace(/'/g, "''")}'`
-    );
-    if (existing.length && existing[0].values.length) {
+    const { data: existing } = await supabase
+      .from("businesses")
+      .select("id")
+      .eq("owner_user_id", user.id)
+      .maybeSingle();
+
+    if (existing) {
       return NextResponse.json(
         { error: "This owner already has a registered business" },
         { status: 409 }
       );
     }
 
-    // Insert business into SQLite
-    db.run(
-      `INSERT INTO businesses (name, category, location, description, owner_pseudonym)
-       VALUES (?, ?, ?, ?, ?)`,
-      [name, category, location || null, description || null, ownerPseudonym]
-    );
+    // Insert business into Supabase
+    const { data: business, error: insertError } = await supabase
+      .from("businesses")
+      .insert({
+        name,
+        category,
+        location: location || null,
+        description: description || null,
+        owner_user_id: user.id,
+        lat: lat ?? null,
+        lng: lng ?? null,
+      })
+      .select()
+      .single();
 
-    // Get the newly inserted business ID
-    const idResult = db.exec("SELECT last_insert_rowid() AS id");
-    const businessId = idResult[0].values[0][0];
+    if (insertError) throw insertError;
 
     // Issue REGISTERED_BUSINESS credential on XRPL
     let credentialHash = null;
@@ -66,14 +77,14 @@ export async function POST(request) {
         const credentialTx = {
           TransactionType: "CredentialCreate",
           Account: masterWallet.address,
-          Subject: masterWallet.address, // Custodial: credential references owner pseudonym in URI
+          Subject: masterWallet.address, // Custodial: credential references owner in URI
           CredentialType: CREDENTIAL_TYPE,
           URI: textToHex(
             JSON.stringify({
-              businessId,
+              businessId: business.id,
               name,
               category,
-              ownerPseudonym,
+              ownerUserId: user.id,
               registeredAt: new Date().toISOString(),
             })
           ),
@@ -83,29 +94,22 @@ export async function POST(request) {
         credentialHash = response.result?.hash || null;
 
         // Update business row with credential hash
-        db.run("UPDATE businesses SET credential_hash = ? WHERE id = ?", [
-          credentialHash,
-          businessId,
-        ]);
+        await supabase
+          .from("businesses")
+          .update({ credential_hash: credentialHash })
+          .eq("id", business.id);
       }
     } catch (xrplError) {
-      // Log but don't fail — business is still registered in SQLite
+      // Log but don't fail — business is still registered in Supabase
       console.error("XRPL credential issuance failed:", xrplError.message);
     }
 
-    persist(db);
-
     return NextResponse.json({
-      id: businessId,
-      name,
-      category,
-      location: location || null,
-      description: description || null,
-      ownerPseudonym,
+      ...business,
       credentialHash,
     });
-  } catch (error) {
-    console.error("Business registration error:", error);
-    return NextResponse.json({ error: error.message }, { status: 500 });
+  } catch (err) {
+    const status = err.status || 500;
+    return NextResponse.json({ error: err.message || "Internal server error" }, { status });
   }
 }

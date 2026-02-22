@@ -1,64 +1,60 @@
-const { getDb, persist } = require("../../../../lib/db");
-const { MIN_PROOF_APPROVALS } = require("../../../../lib/constants");
-const { NextResponse } = require("next/server");
+import { NextResponse } from "next/server";
+import { createClient } from "@/lib/supabase/server";
+import { requireAuth } from "@/lib/supabase/auth";
+import { MIN_PROOF_APPROVALS } from "@/lib/constants";
 
 export async function POST(request) {
   try {
-    const { proofId, approverPseudonym } = await request.json();
+    const user = await requireAuth();
+    const { proofId } = await request.json();
 
-    if (!proofId || !approverPseudonym) {
-      return NextResponse.json(
-        { error: "proofId and approverPseudonym required" },
-        { status: 400 }
-      );
+    if (!proofId) {
+      return NextResponse.json({ error: "proofId required" }, { status: 400 });
     }
 
-    const db = await getDb();
+    const supabase = await createClient();
 
     // Verify proof exists
-    const proofRows = db.exec("SELECT * FROM proofs WHERE id = ?", [proofId]);
-    if (!proofRows.length || !proofRows[0].values.length) {
+    const { data: proof, error: proofError } = await supabase
+      .from("proofs")
+      .select("*")
+      .eq("id", proofId)
+      .single();
+
+    if (proofError) {
       return NextResponse.json({ error: "Proof not found" }, { status: 404 });
     }
 
-    const proofCols = proofRows[0].columns;
-    const proofVals = proofRows[0].values[0];
-    const proof = {};
-    proofCols.forEach((col, idx) => {
-      proof[col] = proofVals[idx];
-    });
-
     // Insert approval
-    db.run(
-      `INSERT INTO proof_approvals (proof_id, approver_pseudonym, approved)
-       VALUES (?, ?, 1)`,
-      [proofId, approverPseudonym]
-    );
+    const { error: approvalError } = await supabase
+      .from("proof_approvals")
+      .insert({ proof_id: proofId, approver_user_id: user.id, approved: true });
 
-    // Count approvals for this proof
-    const countRows = db.exec(
-      "SELECT COUNT(*) as cnt FROM proof_approvals WHERE proof_id = ? AND approved = 1",
-      [proofId]
-    );
-    const approvalCount = countRows[0].values[0][0];
+    if (approvalError) throw approvalError;
+
+    // Count approvals
+    const { count: approvalCount, error: countError } = await supabase
+      .from("proof_approvals")
+      .select("*", { count: "exact", head: true })
+      .eq("proof_id", proofId)
+      .eq("approved", true);
+
+    if (countError) throw countError;
+
+    // If threshold met, update tranche to released
     const thresholdMet = approvalCount >= MIN_PROOF_APPROVALS;
-
-    // If threshold met, update tranche status to 'released'
     if (thresholdMet) {
-      db.run(
-        "UPDATE tranches SET status = 'released', released_at = datetime('now') WHERE id = ?",
-        [proof.tranche_id]
-      );
+      const { error: updateError } = await supabase
+        .from("tranches")
+        .update({ status: "released", released_at: new Date().toISOString() })
+        .eq("id", proof.tranche_id);
+
+      if (updateError) throw updateError;
     }
 
-    persist(db);
-
-    return NextResponse.json({
-      approved: true,
-      approvalCount,
-      thresholdMet,
-    });
+    return NextResponse.json({ approved: true, approvalCount, thresholdMet });
   } catch (err) {
-    return NextResponse.json({ error: err.message }, { status: 500 });
+    const status = err.status || 500;
+    return NextResponse.json({ error: err.message || "Internal server error" }, { status });
   }
 }

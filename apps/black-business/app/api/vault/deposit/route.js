@@ -1,23 +1,57 @@
-const { getDb, persist, recordDeposit, getVaultTotal, getLenderBalance } = require("../../../../lib/db");
-const { NextResponse } = require("next/server");
+import { NextResponse } from "next/server";
+import { createClient } from "@/lib/supabase/server";
+import { requireAuth } from "@/lib/supabase/auth";
+import { getVaultTotal, getLenderBalance, recordDeposit } from "@/lib/supabase/db";
+
+const xrpl = require("xrpl");
+const { getClient } = require("@/lib/xrpl/client");
+const { submitTx } = require("@/lib/xrpl/helpers");
+const { RLUSD_CURRENCY_HEX, RLUSD_ISSUER, VAULT_ADDRESS } = require("@/lib/constants");
 
 export async function POST(request) {
   try {
-    const { pseudonym, amountCents } = await request.json();
+    const user = await requireAuth();
+    const { amountCents } = await request.json();
 
-    if (!pseudonym || !amountCents || amountCents <= 0) {
-      return NextResponse.json({ error: "pseudonym and positive amountCents required" }, { status: 400 });
+    if (!amountCents || amountCents <= 0) {
+      return NextResponse.json({ error: "positive amountCents required" }, { status: 400 });
     }
 
-    const db = await getDb();
-    recordDeposit(db, pseudonym, amountCents);
-    persist(db);
+    await recordDeposit(user.id, amountCents);
+
+    // Non-fatal XRPL on-chain mirror: send RLUSD from platform master → vault
+    try {
+      if (process.env.PLATFORM_MASTER_SEED && RLUSD_ISSUER && VAULT_ADDRESS) {
+        const client = await getClient();
+        const platformWallet = xrpl.Wallet.fromSeed(process.env.PLATFORM_MASTER_SEED);
+        const amountRLUSD = (amountCents / 100).toFixed(2);
+
+        await submitTx(
+          {
+            TransactionType: "Payment",
+            Account: platformWallet.address,
+            Destination: VAULT_ADDRESS,
+            Amount: {
+              currency: RLUSD_CURRENCY_HEX,
+              issuer: RLUSD_ISSUER,
+              value: amountRLUSD,
+            },
+          },
+          client,
+          platformWallet,
+          `vault deposit(${amountRLUSD} RLUSD -> vault)`
+        );
+      }
+    } catch (xrplErr) {
+      console.error("Vault deposit XRPL mirror failed (non-fatal):", xrplErr.message);
+    }
 
     return NextResponse.json({
-      totalCents: getVaultTotal(db),
-      lenderBalanceCents: getLenderBalance(db, pseudonym),
+      totalCents: await getVaultTotal(),
+      lenderBalanceCents: await getLenderBalance(user.id),
     });
   } catch (err) {
-    return NextResponse.json({ error: err.message }, { status: 500 });
+    const status = err.status || 500;
+    return NextResponse.json({ error: err.message || "Internal server error" }, { status });
   }
 }

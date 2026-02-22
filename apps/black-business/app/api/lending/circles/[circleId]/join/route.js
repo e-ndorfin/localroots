@@ -1,71 +1,67 @@
-const { getDb, persist } = require("../../../../../../lib/db");
-const { NextResponse } = require("next/server");
+import { NextResponse } from "next/server";
+import { createClient } from "@/lib/supabase/server";
+import { requireAuth } from "@/lib/supabase/auth";
 
 export async function POST(request, { params }) {
   try {
+    const user = await requireAuth();
     const { circleId } = await params;
-    const { memberPseudonym } = await request.json();
+    const supabase = await createClient();
 
-    if (!memberPseudonym) {
-      return NextResponse.json({ error: "memberPseudonym required" }, { status: 400 });
-    }
+    // Fetch circle
+    const { data: circle, error: circleError } = await supabase
+      .from("circles")
+      .select("*")
+      .eq("id", circleId)
+      .single();
 
-    const db = await getDb();
-
-    // Check circle exists and status is 'forming'
-    const circleRows = db.exec("SELECT * FROM circles WHERE id = ?", [circleId]);
-    if (!circleRows.length || !circleRows[0].values.length) {
+    if (circleError) {
       return NextResponse.json({ error: "Circle not found" }, { status: 404 });
     }
 
-    const circleCols = circleRows[0].columns;
-    const circleVals = circleRows[0].values[0];
-    const circle = {};
-    circleCols.forEach((col, idx) => {
-      circle[col] = circleVals[idx];
-    });
-
     if (circle.status !== "forming") {
       return NextResponse.json(
-        { error: `Circle status is '${circle.status}', must be 'forming' to join` },
+        { error: `Circle status is '${circle.status}', expected 'forming'` },
         { status: 400 }
       );
     }
 
-    // Check member count < max_members
-    const countRows = db.exec(
-      "SELECT COUNT(*) as cnt FROM circle_members WHERE circle_id = ?",
-      [circleId]
-    );
-    const currentCount = countRows[0].values[0][0];
+    // Count current members
+    const { count: memberCount, error: countError } = await supabase
+      .from("circle_members")
+      .select("*", { count: "exact", head: true })
+      .eq("circle_id", circleId);
 
-    if (currentCount >= circle.max_members) {
+    if (countError) throw countError;
+
+    if (memberCount >= circle.max_members) {
       return NextResponse.json({ error: "Circle is full" }, { status: 400 });
     }
 
     // Insert member
-    db.run(
-      "INSERT INTO circle_members (circle_id, member_pseudonym) VALUES (?, ?)",
-      [circleId, memberPseudonym]
-    );
+    const { error: insertError } = await supabase
+      .from("circle_members")
+      .insert({ circle_id: circleId, member_user_id: user.id });
 
-    // If member count now equals max_members, update circle status to 'active'
-    const newCount = currentCount + 1;
-    if (newCount >= circle.max_members) {
-      db.run(
-        "UPDATE circles SET status = 'active' WHERE id = ?",
-        [circleId]
-      );
+    if (insertError) throw insertError;
+
+    const newMemberCount = memberCount + 1;
+    let circleStatus = circle.status;
+
+    // If now full, update circle status to active
+    if (newMemberCount >= circle.max_members) {
+      const { error: updateError } = await supabase
+        .from("circles")
+        .update({ status: "active" })
+        .eq("id", circleId);
+
+      if (updateError) throw updateError;
+      circleStatus = "active";
     }
 
-    persist(db);
-
-    return NextResponse.json({
-      success: true,
-      memberCount: newCount,
-      circleStatus: newCount >= circle.max_members ? "active" : "forming",
-    });
+    return NextResponse.json({ success: true, memberCount: newMemberCount, circleStatus });
   } catch (err) {
-    return NextResponse.json({ error: err.message }, { status: 500 });
+    const status = err.status || 500;
+    return NextResponse.json({ error: err.message || "Internal server error" }, { status });
   }
 }

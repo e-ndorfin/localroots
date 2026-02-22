@@ -1,31 +1,31 @@
-const { getDb, persist } = require("../../../../lib/db");
-const { NextResponse } = require("next/server");
+import { NextResponse } from "next/server";
+import { createClient } from "@/lib/supabase/server";
+import { requireAuth } from "@/lib/supabase/auth";
 
 export async function POST(request) {
   try {
-    const { trancheId, borrowerPseudonym, proofType, description } = await request.json();
+    const user = await requireAuth();
+    const { trancheId, proofType, description } = await request.json();
 
-    if (!trancheId || !borrowerPseudonym || !proofType) {
+    if (!trancheId || !proofType || !description) {
       return NextResponse.json(
-        { error: "trancheId, borrowerPseudonym, and proofType required" },
+        { error: "trancheId, proofType, and description required" },
         { status: 400 }
       );
     }
 
-    const db = await getDb();
+    const supabase = await createClient();
 
-    // Verify tranche exists and status is 'locked'
-    const trancheRows = db.exec("SELECT * FROM tranches WHERE id = ?", [trancheId]);
-    if (!trancheRows.length || !trancheRows[0].values.length) {
+    // Find tranche and check status
+    const { data: tranche, error: findError } = await supabase
+      .from("tranches")
+      .select("*")
+      .eq("id", trancheId)
+      .single();
+
+    if (findError) {
       return NextResponse.json({ error: "Tranche not found" }, { status: 404 });
     }
-
-    const trancheCols = trancheRows[0].columns;
-    const trancheVals = trancheRows[0].values[0];
-    const tranche = {};
-    trancheCols.forEach((col, idx) => {
-      tranche[col] = trancheVals[idx];
-    });
 
     if (tranche.status !== "locked") {
       return NextResponse.json(
@@ -35,31 +35,30 @@ export async function POST(request) {
     }
 
     // Insert proof
-    db.run(
-      `INSERT INTO proofs (tranche_id, borrower_pseudonym, proof_type, description)
-       VALUES (?, ?, ?, ?)`,
-      [trancheId, borrowerPseudonym, proofType, description || null]
-    );
+    const { data: proof, error: proofError } = await supabase
+      .from("proofs")
+      .insert({
+        tranche_id: trancheId,
+        borrower_user_id: user.id,
+        proof_type: proofType,
+        description,
+      })
+      .select()
+      .single();
 
-    const proofIdRows = db.exec("SELECT last_insert_rowid()");
-    const proofId = proofIdRows[0].values[0][0];
+    if (proofError) throw proofError;
 
-    // Update tranche status to 'proof_submitted'
-    db.run("UPDATE tranches SET status = 'proof_submitted' WHERE id = ?", [trancheId]);
+    // Update tranche status to proof_submitted
+    const { error: updateError } = await supabase
+      .from("tranches")
+      .update({ status: "proof_submitted" })
+      .eq("id", trancheId);
 
-    persist(db);
-
-    // Fetch and return the proof record
-    const proofRows = db.exec("SELECT * FROM proofs WHERE id = ?", [proofId]);
-    const proofCols = proofRows[0].columns;
-    const proofVals = proofRows[0].values[0];
-    const proof = {};
-    proofCols.forEach((col, idx) => {
-      proof[col] = proofVals[idx];
-    });
+    if (updateError) throw updateError;
 
     return NextResponse.json({ proof });
   } catch (err) {
-    return NextResponse.json({ error: err.message }, { status: 500 });
+    const status = err.status || 500;
+    return NextResponse.json({ error: err.message || "Internal server error" }, { status });
   }
 }

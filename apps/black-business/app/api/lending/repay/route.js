@@ -1,9 +1,11 @@
-const { getDb, persist } = require("../../../../lib/db");
-const { LOAN_TIERS } = require("../../../../lib/constants");
-const { NextResponse } = require("next/server");
+import { NextResponse } from "next/server";
+import { createClient } from "@/lib/supabase/server";
+import { requireAuth } from "@/lib/supabase/auth";
+import { LOAN_TIERS } from "@/lib/constants";
 
 export async function POST(request) {
   try {
+    await requireAuth();
     const { loanId, amountCents } = await request.json();
 
     if (!loanId || !amountCents || amountCents <= 0) {
@@ -13,20 +15,18 @@ export async function POST(request) {
       );
     }
 
-    const db = await getDb();
+    const supabase = await createClient();
 
     // Find loan
-    const loanRows = db.exec("SELECT * FROM loans WHERE id = ?", [loanId]);
-    if (!loanRows.length || !loanRows[0].values.length) {
+    const { data: loan, error: findError } = await supabase
+      .from("loans")
+      .select("*")
+      .eq("id", loanId)
+      .single();
+
+    if (findError) {
       return NextResponse.json({ error: "Loan not found" }, { status: 404 });
     }
-
-    const loanCols = loanRows[0].columns;
-    const loanVals = loanRows[0].values[0];
-    const loan = {};
-    loanCols.forEach((col, idx) => {
-      loan[col] = loanVals[idx];
-    });
 
     if (loan.status !== "active") {
       return NextResponse.json(
@@ -35,81 +35,87 @@ export async function POST(request) {
       );
     }
 
-    // Update repaid_cents
+    // Calculate new repaid amount
     const newRepaidCents = loan.repaid_cents + amountCents;
     const fullyRepaid = newRepaidCents >= loan.total_repayment_cents;
 
-    db.run(
-      `UPDATE loans SET repaid_cents = ?, status = ?, updated_at = datetime('now') WHERE id = ?`,
-      [newRepaidCents, fullyRepaid ? "repaid" : "active", loanId]
-    );
+    // Update loan
+    const { error: updateError } = await supabase
+      .from("loans")
+      .update({
+        repaid_cents: newRepaidCents,
+        status: fullyRepaid ? "repaid" : "active",
+        updated_at: new Date().toISOString(),
+      })
+      .eq("id", loanId);
 
-    // If fully repaid, upgrade borrower tier
+    if (updateError) throw updateError;
+
+    // If fully repaid, handle tier upgrade
     if (fullyRepaid) {
-      // Upsert borrower_tiers
-      const existingTier = db.exec(
-        "SELECT tier, completed_loans FROM borrower_tiers WHERE borrower_pseudonym = ?",
-        [loan.borrower_pseudonym]
-      );
+      const tierMaxMap = {
+        1: LOAN_TIERS.MICRO.maxAmount * 100,
+        2: LOAN_TIERS.SMALL.maxAmount * 100,
+        3: LOAN_TIERS.MEDIUM.maxAmount * 100,
+      };
 
-      if (existingTier.length && existingTier[0].values.length) {
-        const currentTier = existingTier[0].values[0][0];
-        const completedLoans = existingTier[0].values[0][1] + 1;
+      // Look up existing tier
+      const { data: existingTier } = await supabase
+        .from("borrower_tiers")
+        .select("*")
+        .eq("borrower_user_id", loan.borrower_user_id)
+        .maybeSingle();
 
-        // Determine new tier based on completed loans
-        let newTier = currentTier;
-        if (completedLoans >= LOAN_TIERS.MEDIUM.requiredCompletions && currentTier < 3) {
+      if (existingTier) {
+        const completedLoans = existingTier.completed_loans + 1;
+        let newTier = existingTier.tier;
+        if (completedLoans >= LOAN_TIERS.MEDIUM.requiredCompletions && newTier < 3) {
           newTier = 3;
-        } else if (completedLoans >= LOAN_TIERS.SMALL.requiredCompletions && currentTier < 2) {
+        } else if (completedLoans >= LOAN_TIERS.SMALL.requiredCompletions && newTier < 2) {
           newTier = 2;
         }
 
-        const tierMaxMap = {
-          1: LOAN_TIERS.MICRO.maxAmount * 100,
-          2: LOAN_TIERS.SMALL.maxAmount * 100,
-          3: LOAN_TIERS.MEDIUM.maxAmount * 100,
-        };
+        const { error: tierError } = await supabase
+          .from("borrower_tiers")
+          .update({
+            completed_loans: completedLoans,
+            tier: newTier,
+            max_loan_cents: tierMaxMap[newTier],
+            updated_at: new Date().toISOString(),
+          })
+          .eq("borrower_user_id", loan.borrower_user_id);
 
-        db.run(
-          `UPDATE borrower_tiers
-           SET completed_loans = ?, tier = ?, max_loan_cents = ?, updated_at = datetime('now')
-           WHERE borrower_pseudonym = ?`,
-          [completedLoans, newTier, tierMaxMap[newTier], loan.borrower_pseudonym]
-        );
+        if (tierError) throw tierError;
       } else {
-        // First completed loan — insert tier record at tier 1 with 1 completion
+        // First completed loan
         let newTier = 1;
         if (1 >= LOAN_TIERS.SMALL.requiredCompletions) {
           newTier = 2;
         }
 
-        const tierMaxMap = {
-          1: LOAN_TIERS.MICRO.maxAmount * 100,
-          2: LOAN_TIERS.SMALL.maxAmount * 100,
-          3: LOAN_TIERS.MEDIUM.maxAmount * 100,
-        };
+        const { error: tierError } = await supabase.from("borrower_tiers").insert({
+          borrower_user_id: loan.borrower_user_id,
+          tier: newTier,
+          completed_loans: 1,
+          max_loan_cents: tierMaxMap[newTier],
+        });
 
-        db.run(
-          `INSERT INTO borrower_tiers (borrower_pseudonym, tier, completed_loans, max_loan_cents)
-           VALUES (?, ?, 1, ?)`,
-          [loan.borrower_pseudonym, newTier, tierMaxMap[newTier]]
-        );
+        if (tierError) throw tierError;
       }
     }
 
-    persist(db);
+    // Fetch and return updated loan
+    const { data: updatedLoan, error: fetchError } = await supabase
+      .from("loans")
+      .select("*")
+      .eq("id", loanId)
+      .single();
 
-    // Fetch updated loan
-    const updatedRows = db.exec("SELECT * FROM loans WHERE id = ?", [loanId]);
-    const updatedCols = updatedRows[0].columns;
-    const updatedVals = updatedRows[0].values[0];
-    const updatedLoan = {};
-    updatedCols.forEach((col, idx) => {
-      updatedLoan[col] = updatedVals[idx];
-    });
+    if (fetchError) throw fetchError;
 
     return NextResponse.json({ loan: updatedLoan });
   } catch (err) {
-    return NextResponse.json({ error: err.message }, { status: 500 });
+    const status = err.status || 500;
+    return NextResponse.json({ error: err.message || "Internal server error" }, { status });
   }
 }

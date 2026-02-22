@@ -1,8 +1,11 @@
-const { NextResponse } = require("next/server");
-const { getDb, persist } = require("../../../../lib/db");
-const { POINTS_PER_DOLLAR } = require("../../../../lib/constants");
+import { NextResponse } from "next/server";
+import { createClient } from "@/lib/supabase/server";
+import { POINTS_PER_DOLLAR } from "@/lib/constants";
+import { getClient } from "@/lib/xrpl/client";
+import { getOrCreateCustomerWallet } from "@/lib/xrpl/wallets";
+import { mintMPT } from "@/lib/xrpl/loyalty";
 
-async function POST(request) {
+export async function POST(request) {
   try {
     const rawBody = await request.text();
     const sig = request.headers.get("stripe-signature");
@@ -10,7 +13,8 @@ async function POST(request) {
     let event;
 
     if (process.env.STRIPE_SECRET_KEY && process.env.STRIPE_WEBHOOK_SECRET) {
-      const stripe = require("stripe")(process.env.STRIPE_SECRET_KEY);
+      const Stripe = (await import("stripe")).default;
+      const stripe = Stripe(process.env.STRIPE_SECRET_KEY);
       try {
         event = stripe.webhooks.constructEvent(
           rawBody,
@@ -31,43 +35,52 @@ async function POST(request) {
 
     if (event.type === "payment_intent.succeeded") {
       const paymentIntent = event.data.object;
-      const { businessId, customerPseudonym } = paymentIntent.metadata;
+      const { businessId, customerUserId } = paymentIntent.metadata;
       const amount = paymentIntent.amount;
 
-      const db = await getDb();
+      const supabase = await createClient();
 
       // Credit business balance
-      db.run(
-        "UPDATE businesses SET balance_cents = balance_cents + ?, updated_at = datetime('now') WHERE id = ?",
-        [amount, businessId]
-      );
+      const { data: biz } = await supabase
+        .from("businesses")
+        .select("balance_cents")
+        .eq("id", businessId)
+        .single();
+
+      await supabase
+        .from("businesses")
+        .update({
+          balance_cents: biz.balance_cents + amount,
+          updated_at: new Date().toISOString(),
+        })
+        .eq("id", businessId);
 
       // Calculate and award loyalty points
       const points = Math.floor((amount / 100) * POINTS_PER_DOLLAR);
 
       if (points > 0) {
-        db.run(
-          "INSERT INTO points_ledger (customer_pseudonym, business_id, type, points, description) VALUES (?, ?, 'earn', ?, ?)",
-          [
-            customerPseudonym,
-            businessId,
-            points,
-            `Purchase of $${(amount / 100).toFixed(2)}`,
-          ]
-        );
-      }
+        await supabase.from("points_ledger").insert({
+          customer_user_id: customerUserId,
+          business_id: businessId,
+          type: "earn",
+          points,
+          description: `Purchase of $${(amount / 100).toFixed(2)}`,
+        });
 
-      persist(db);
+        // On-chain: mint MPT to customer (non-fatal on failure)
+        try {
+          const client = await getClient();
+          const { address } = await getOrCreateCustomerWallet(supabase, customerUserId);
+          await mintMPT(client, address, points);
+        } catch (xrplErr) {
+          console.error("XRPL mint in webhook failed (non-fatal):", xrplErr.message);
+        }
+      }
     }
 
     return NextResponse.json({ received: true });
   } catch (err) {
-    console.error("POST /api/payments/webhook error:", err);
-    return NextResponse.json(
-      { error: err.message || "Internal server error" },
-      { status: 500 }
-    );
+    const status = err.status || 500;
+    return NextResponse.json({ error: err.message || "Internal server error" }, { status });
   }
 }
-
-module.exports = { POST };

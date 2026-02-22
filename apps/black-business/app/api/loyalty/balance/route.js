@@ -1,53 +1,40 @@
-const { NextResponse } = require("next/server");
-const { getDb } = require("../../../../lib/db");
+import { NextResponse } from "next/server";
+import { createClient } from "@/lib/supabase/server";
+import { requireAuth } from "@/lib/supabase/auth";
 
-async function GET(request) {
+/**
+ * GET /api/loyalty/balance
+ *
+ * Returns the authenticated user's loyalty point balance and recent history.
+ */
+export async function GET() {
   try {
-    const { searchParams } = new URL(request.url);
-    const pseudonym = searchParams.get("pseudonym");
+    const user = await requireAuth();
+    const supabase = await createClient();
 
-    if (!pseudonym) {
-      return NextResponse.json(
-        { error: "Missing required query parameter: pseudonym" },
-        { status: 400 }
-      );
-    }
+    // Calculate total balance
+    const { data: rows, error: balanceError } = await supabase
+      .from("points_ledger")
+      .select("points")
+      .eq("customer_user_id", user.id);
 
-    const db = await getDb();
+    if (balanceError) throw balanceError;
 
-    // Total balance
-    const balanceResult = db.exec(
-      "SELECT COALESCE(SUM(points), 0) AS balance FROM points_ledger WHERE customer_pseudonym = ?",
-      [pseudonym]
-    );
-    const balance = balanceResult.length ? balanceResult[0].values[0][0] : 0;
+    const balance = rows.reduce((sum, row) => sum + row.points, 0);
 
     // Last 20 history entries
-    const historyResult = db.exec(
-      "SELECT id, business_id, type, points, description, created_at FROM points_ledger WHERE customer_pseudonym = ? ORDER BY created_at DESC LIMIT 20",
-      [pseudonym]
-    );
+    const { data: history, error: historyError } = await supabase
+      .from("points_ledger")
+      .select("id, business_id, type, points, description, created_at")
+      .eq("customer_user_id", user.id)
+      .order("created_at", { ascending: false })
+      .limit(20);
 
-    let history = [];
-    if (historyResult.length && historyResult[0].values.length) {
-      const columns = historyResult[0].columns;
-      history = historyResult[0].values.map((row) => {
-        const obj = {};
-        columns.forEach((col, i) => {
-          obj[col] = row[i];
-        });
-        return obj;
-      });
-    }
+    if (historyError) throw historyError;
 
-    return NextResponse.json({ pseudonym, balance, history });
+    return NextResponse.json({ userId: user.id, balance, history });
   } catch (err) {
-    console.error("GET /api/loyalty/balance error:", err);
-    return NextResponse.json(
-      { error: err.message || "Internal server error" },
-      { status: 500 }
-    );
+    const status = err.status || 500;
+    return NextResponse.json({ error: err.message || "Internal server error" }, { status });
   }
 }
-
-module.exports = { GET };
