@@ -377,35 +377,45 @@ The SAV is an XRPL account that holds RLUSD pooled from community lenders. The v
 6. Split loan into milestone tranches (e.g. $3,000 loan = 3 × $1,000)
 7. Create XRPL escrow for first tranche only (next escrow created after previous milestone met)
 
-**Milestone-Gated Proof-Based Disbursement** (Escrow pattern):
+**Milestone-Gated Proof-Based Disbursement** (Custodial pattern):
 
 Each tranche requires the borrower to submit proof of a business-related milestone before funds are released. This ensures capital is used productively and gives the lending circle oversight.
 
-**Proof flow per tranche**:
-1. Escrow created with crypto-condition (SHA256 from `five-bells-condition`)
+> **⚠️ XLS-85 NOT ACTIVE ON TESTNET (verified Feb 22 2026)**
+> Native XRPL token escrow (XLS-85) went live on mainnet Feb 12 2026 but is not yet active on
+> testnet — `EscrowCreate` with an RLUSD `Amount` returns `tecNO_PERMISSION`. Do NOT use
+> `EscrowCreate` for RLUSD tranches. Use the custodial pattern below instead.
+> XRP escrow (crypto-conditions, `FinishAfter`, `CancelAfter`) works fine on testnet and can be
+> used as a reference for the mechanics, but the actual disbursement must use direct Payments.
+
+**Proof flow per tranche (custodial)**:
+1. On loan approval, platform marks tranche as `locked` in SQLite — RLUSD stays in vault account
 2. Borrower completes milestone (e.g. buys equipment, signs lease, purchases inventory)
 3. Borrower uploads proof via `api/lending/submit-proof/route.js` (receipt, invoice, photo)
 4. Circle members review proof (at least 2 of 4+ members must approve)
-5. On approval, platform provides escrow fulfillment → `EscrowFinish` releases funds to borrower
+5. On approval threshold met, platform sends direct RLUSD `Payment` from vault to borrower
 6. Smart contract records disbursement via `record_disbursement()`
-7. Next tranche escrow is created, cycle repeats
+7. Next tranche unlocked, cycle repeats
+8. **Missed deadline**: handled by backend — cron job or check on next action sets tranche to `expired` in SQLite and returns the reserved RLUSD to the vault pool (no on-chain auto-return)
 
 **Milestone proof types**: receipt/invoice upload, photo of purchased equipment/inventory, signed lease or contract, bank statement showing business expense, screenshot of completed task.
 
 ```javascript
-// Pattern from escrow.js lines 150-161
-const escrowTx = {
-  TransactionType: "EscrowCreate",
+// disburse/route.js — mark tranche locked in SQLite, no EscrowCreate
+db.run("UPDATE tranches SET status = 'locked' WHERE id = ?", [trancheId]);
+
+// approve-proof/route.js — direct Payment when threshold met (replaces EscrowFinish)
+const releaseTx = {
+  TransactionType: "Payment",
   Account: vaultAccount.address,
   Destination: borrowerAddress,
-  Amount: xrpToDrops(trancheAmount),  // or RLUSD amount
-  FinishAfter: isoTimeToRippleTime(milestoneDate),
-  CancelAfter: isoTimeToRippleTime(deadlineDate),  // Auto-return to vault if milestone not met
-  Condition: condition,  // SHA256 condition from five-bells-condition
+  Amount: { currency: RLUSD_HEX, issuer: RLUSD_ISSUER, value: String(trancheAmount) },
 };
+await client.submitAndWait(releaseTx, { autofill: true, wallet: vaultWallet });
+db.run("UPDATE tranches SET status = 'released' WHERE id = ?", [trancheId]);
 ```
 
-If `CancelAfter` is reached without proof approval, the escrow auto-cancels and funds return to the SAV vault. This protects lender capital from stalled loans.
+The on-chain enforcement of missed deadlines (previously `CancelAfter`) is replaced by backend logic. UX is identical for borrowers and circle members.
 
 **`api/lending/submit-proof/route.js`** — Borrower submits milestone proof:
 1. Validate borrower has an active loan with pending milestone (SQLite query on `tranches`)
@@ -658,9 +668,9 @@ The central pooling and routing mechanism. Community contributions flow in, vett
 
 ### Phase 7: Lending Circles + Microloans (Borrower Flow)
 1. Build `api/lending/apply/route.js` — check tier from SQLite `borrower_tiers`, check vault capital via `ContractCall` to `get_vault_total()`, insert into SQLite `loans` + `tranches`, calculate interest in JS
-2. Build `api/lending/disburse/route.js` — create milestone escrow using `EscrowCreate` + conditions + `CancelAfter` deadline from `escrow.js`; store escrow ID in SQLite `tranches`
+2. Build `api/lending/disburse/route.js` — mark tranche `locked` in SQLite `tranches`; RLUSD stays in vault (no `EscrowCreate` — XLS-85 not active on testnet, see escrow note above)
 3. Build `api/lending/submit-proof/route.js` — insert into SQLite `proofs`, update `tranches` status to `proof_submitted`
-4. Build `api/lending/approve-proof/route.js` — insert into SQLite `proof_approvals`; if threshold met in JS, call `EscrowFinish` on XRPL, update SQLite `tranches` to `released`
+4. Build `api/lending/approve-proof/route.js` — insert into SQLite `proof_approvals`; if threshold met in JS, send direct RLUSD `Payment` from vault to borrower (replaces `EscrowFinish`), update SQLite `tranches` to `released`
 5. Build `api/lending/repay/route.js` — Stripe card payment → platform converts to RLUSD → Payment to vault on XRPL; update SQLite `loans`, `lender_interest`; upgrade `borrower_tiers` in SQLite; call `ContractCall` `deposit()`
 6. Build credential issuance for circle membership — pattern from `credentials.js` lines 174-249 (on-chain, XRPL)
 7. Build `useLendingCircle()` hook
