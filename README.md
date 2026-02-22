@@ -51,21 +51,29 @@ Copy the contents of `supabase/schema.sql` and run it in the **Supabase SQL Edit
 
 Only needed for on-chain features (business credentials, loyalty token minting, RLUSD settlement):
 
-```bash
-node apps/black-business/scripts/init-platform.js
-```
-
-This generates 4 funded Devnet wallets (RLUSD issuer, platform master, vault, rewards pool). Copy the printed values into `.env.local`.
-
-Then set up trustlines, mint initial RLUSD supply, and create the loyalty token:
+All scripts must be run from `apps/black-business/` so they can read `.env.local`:
 
 ```bash
-node apps/black-business/scripts/setup-trustlines.js
-node apps/black-business/scripts/mint-rlusd.js
-node apps/black-business/scripts/create-loyalty-mpt.js
+cd apps/black-business
 ```
 
-Copy the printed `NEXT_PUBLIC_LOYALTY_MPT_ID` into `.env.local`.
+**5a.** Generate 4 funded Devnet wallets:
+
+```bash
+node scripts/init-platform.js
+```
+
+**5b.** Copy **all** the printed values into `.env.local` before continuing. The next scripts read these env vars at startup and will fail without them.
+
+**5c.** Set up trustlines, mint initial RLUSD supply, and create the loyalty token (run these in order):
+
+```bash
+node scripts/setup-trustlines.js
+node scripts/mint-rlusd.js
+node scripts/create-loyalty-mpt.js
+```
+
+**5d.** Copy the printed `NEXT_PUBLIC_LOYALTY_MPT_ID` into `.env.local`.
 
 ### 6. Run the app
 
