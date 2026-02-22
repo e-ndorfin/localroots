@@ -2,6 +2,7 @@
 
 import { useEffect, useState, useCallback } from "react";
 import { useParams } from "next/navigation";
+import Topbar from "@/components/layout/Header";
 import CircleDetail from "@/components/lending/CircleDetail";
 import LoanRequestForm from "@/components/lending/LoanRequestForm";
 import TrancheProgress from "@/components/lending/TrancheProgress";
@@ -54,24 +55,31 @@ export default function CirclePage() {
   const isMember = userId && members.some((m) => m.member_user_id === userId);
 
   return (
-    <div className="space-y-4">
-      <CircleDetail
-        circleId={circleId}
-        circle={circle}
-        members={members}
-        loading={loading}
-        userId={userId}
-        isMember={isMember}
-        onJoined={fetchCircleData}
-      />
-      {isMember && (
-        <div className="grid gap-3 lg:grid-cols-2">
-          <LoanRequestForm circleId={circleId} />
-          <TierIndicator tier={tier || "Micro"} />
-          <TrancheProgress loans={loans} userId={userId} memberCount={members.length} />
-          <RepaymentForm loans={loans} userId={userId} />
+    <>
+      <div className="bg-orb orb-a"></div>
+      <div className="bg-orb orb-b"></div>
+      <Topbar />
+      <main className="content">
+        <div className="space-y-4">
+          <CircleDetail
+            circleId={circleId}
+            circle={circle}
+            members={members}
+            loading={loading}
+            userId={userId}
+            isMember={isMember}
+            onJoined={fetchCircleData}
+          />
+          {isMember && (
+            <div className="grid gap-3 lg:grid-cols-2">
+              <LoanRequestForm circleId={circleId} />
+              <TierIndicator tier={tier || "Micro"} />
+              <TrancheProgress loans={loans} userId={userId} memberCount={members.length} />
+              <RepaymentForm loans={loans} userId={userId} />
+            </div>
+          )}
         </div>
-      )}
-    </div>
+      </main>
+    </>
   );
 }
