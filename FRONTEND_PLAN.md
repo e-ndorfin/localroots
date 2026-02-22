@@ -4,6 +4,100 @@ All pages live under `apps/black-business/app/`. Built with Next.js 14, Tailwind
 
 ---
 
+## STEP 0: Migrate from Plain HTML to Next.js + Tailwind + React
+
+You're currently writing plain HTML. Before building any pages, set up the proper stack first, then move your existing work into it.
+
+### 1. Create the Next.js app
+
+```bash
+cd apps/
+npx create-next-app@14 black-business --js --tailwind --eslint --app --src-dir=false --import-alias="@/*" --no-turbo
+cd black-business
+```
+
+### 2. Install dependencies
+
+```bash
+npm install xrpl xrpl-connect stripe @stripe/stripe-js @stripe/react-stripe-js
+npm install -D tailwindcss postcss autoprefixer
+```
+
+### 3. Set up Tailwind
+
+Tailwind should already be configured by `create-next-app --tailwind`. Open `tailwind.config.js` and add our custom colors (see "Tailwind Theme Colors" section below).
+
+### 4. Move your existing HTML into Next.js pages
+
+For each HTML page you've already built:
+1. Create the matching route folder under `app/` (see the table below for paths)
+2. Create a `page.js` file in that folder
+3. Convert your HTML to JSX:
+   - `class=` → `className=`
+   - `for=` → `htmlFor=`
+   - Self-close tags like `<img>` → `<img />`
+   - `style="color: red"` → `style={{ color: "red" }}` (or just use Tailwind classes instead)
+   - Wrap everything in a default export: `export default function PageName() { return (...) }`
+4. Replace any `<a href>` links with Next.js `<Link href>` (import from `next/link`)
+5. Move inline styles to Tailwind utility classes
+
+**Example — converting an HTML page to a Next.js page:**
+
+Your old HTML:
+```html
+<div class="container">
+  <h1>Business Directory</h1>
+  <a href="/business/register">Register</a>
+</div>
+```
+
+New `app/directory/page.js`:
+```jsx
+import Link from "next/link";
+
+export default function DirectoryPage() {
+  return (
+    <div className="container mx-auto p-4">
+      <h1 className="text-3xl font-bold">Business Directory</h1>
+      <Link href="/business/register" className="text-accent underline">
+        Register
+      </Link>
+    </div>
+  );
+}
+```
+
+### 5. Set up the root layout
+
+Create `app/layout.js` — this wraps every page with shared HTML, fonts, and global CSS:
+
+```jsx
+import "./globals.css";
+
+export const metadata = {
+  title: "LocalRoots — Black Business Support",
+  description: "Shop, earn, and invest in Black-owned businesses",
+};
+
+export default function RootLayout({ children }) {
+  return (
+    <html lang="en">
+      <body>{children}</body>
+    </html>
+  );
+}
+```
+
+### 6. Verify it works
+
+```bash
+npm run dev
+```
+
+Open `http://localhost:3000` — you should see your landing page. Every route in the table below should work once you create its `page.js`.
+
+---
+
 ## Pages Overview
 
 | Route | File | Role | Description |
@@ -261,3 +355,16 @@ Pages are listed in the order they should be built (matches master plan phases):
 5. **Phase 7**: `/lending`, `/lending/[circleId]`
 6. **Phase 8**: `/business/dashboard`
 7. **Phase 9**: `/dashboard`, polish, responsive design
+
+---
+
+## Running the Dev Server
+
+After setup, always keep the dev server running while you work so you can see changes live:
+
+```bash
+cd apps/black-business
+npm run dev
+```
+
+This starts the Next.js dev server at **http://localhost:3000** with hot reload — every time you save a file, the browser updates automatically. Keep this terminal open in the background while you code.
