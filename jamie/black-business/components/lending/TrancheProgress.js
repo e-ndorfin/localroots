@@ -1,0 +1,1 @@
+export default function TrancheProgress() { return <div className="card"><h3 className="mb-3 text-lg font-semibold">Tranche Progress</h3><div className="space-y-2 text-sm"><p>Tranche 1 released</p><p>Tranche 2 pending milestone proof</p><p>Tranche 3 pending vote</p></div></div>; }

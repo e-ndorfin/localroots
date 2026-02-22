@@ -1,0 +1,1 @@
+export default function TierIndicator({ tier = "Micro" }) { return <div className="card"><h3 className="text-lg font-semibold">Borrower Tier</h3><p className="mt-1 text-2xl font-bold text-lending">{tier}</p><p className="text-sm text-slate-500">Progression: Micro ? Small ? Medium</p></div>; }

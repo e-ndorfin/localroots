@@ -1,0 +1,1 @@
+export default function LoanRequestForm() { return <form className="card space-y-3" onSubmit={(e) => e.preventDefault()}><h3 className="text-lg font-semibold">Request Loan</h3><input className="input" type="number" placeholder="Requested amount" /><button className="button-primary">Submit Request</button></form>; }

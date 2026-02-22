@@ -1,0 +1,1 @@
+export default function RepaymentForm() { return <form className="card space-y-3" onSubmit={(e) => e.preventDefault()}><h3 className="text-lg font-semibold">Repayment</h3><input className="input" type="number" placeholder="RLUSD repayment amount" /><button className="button-outline">Submit Repayment</button></form>; }

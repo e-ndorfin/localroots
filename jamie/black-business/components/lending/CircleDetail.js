@@ -1,0 +1,1 @@
+export default function CircleDetail({ circleId }) { return <div className="card"><h2 className="text-xl font-bold">Circle: {circleId}</h2><p className="mt-2 text-slate-600">Members collaborate on milestone-based lending decisions.</p></div>; }
