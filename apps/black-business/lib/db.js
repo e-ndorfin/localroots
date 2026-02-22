@@ -182,6 +182,17 @@ function initSchema(db) {
     );
   `);
 
+  db.run(`
+    -- Vault deposit/withdrawal event log (replaces Rust WASM contract)
+    CREATE TABLE IF NOT EXISTS vault_deposits (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      lender_pseudonym TEXT NOT NULL,
+      amount_cents INTEGER NOT NULL,
+      type TEXT NOT NULL CHECK(type IN ('deposit', 'withdrawal')),
+      created_at TEXT NOT NULL DEFAULT (datetime('now'))
+    );
+  `);
+
   // Indexes for common queries
   const indexes = [
     "CREATE INDEX IF NOT EXISTS idx_businesses_category ON businesses(category);",
@@ -199,10 +210,66 @@ function initSchema(db) {
     "CREATE INDEX IF NOT EXISTS idx_points_ledger_business ON points_ledger(business_id);",
     "CREATE INDEX IF NOT EXISTS idx_lender_interest_lender ON lender_interest(lender_pseudonym);",
     "CREATE INDEX IF NOT EXISTS idx_lender_interest_loan ON lender_interest(loan_id);",
+    "CREATE INDEX IF NOT EXISTS idx_vault_deposits_lender ON vault_deposits(lender_pseudonym);",
+    "CREATE INDEX IF NOT EXISTS idx_vault_deposits_type ON vault_deposits(type);",
   ];
   for (const idx of indexes) {
     db.run(idx);
   }
 }
 
-module.exports = { getDb, persist };
+// ---------------------------------------------------------------------------
+// Vault helpers (replace the 4 Rust WASM contract functions)
+// ---------------------------------------------------------------------------
+
+function getVaultTotal(db) {
+  const row = db.exec(
+    `SELECT
+       COALESCE(SUM(CASE WHEN type = 'deposit' THEN amount_cents ELSE 0 END), 0) -
+       COALESCE(SUM(CASE WHEN type = 'withdrawal' THEN amount_cents ELSE 0 END), 0)
+       AS total
+     FROM vault_deposits`
+  );
+  return row.length ? row[0].values[0][0] : 0;
+}
+
+function getLenderBalance(db, pseudonym) {
+  const row = db.exec(
+    `SELECT
+       COALESCE(SUM(CASE WHEN type = 'deposit' THEN amount_cents ELSE 0 END), 0) -
+       COALESCE(SUM(CASE WHEN type = 'withdrawal' THEN amount_cents ELSE 0 END), 0)
+       AS balance
+     FROM vault_deposits
+     WHERE lender_pseudonym = '${pseudonym.replace(/'/g, "''")}'`
+  );
+  return row.length ? row[0].values[0][0] : 0;
+}
+
+function recordDeposit(db, pseudonym, amountCents) {
+  db.run(
+    "INSERT INTO vault_deposits (lender_pseudonym, amount_cents, type) VALUES (?, ?, 'deposit')",
+    [pseudonym, amountCents]
+  );
+}
+
+function recordWithdrawal(db, pseudonym, amountCents) {
+  const balance = getLenderBalance(db, pseudonym);
+  if (amountCents > balance) {
+    throw new Error(
+      `Insufficient balance: requested ${amountCents} but lender has ${balance}`
+    );
+  }
+  db.run(
+    "INSERT INTO vault_deposits (lender_pseudonym, amount_cents, type) VALUES (?, ?, 'withdrawal')",
+    [pseudonym, amountCents]
+  );
+}
+
+module.exports = {
+  getDb,
+  persist,
+  getVaultTotal,
+  getLenderBalance,
+  recordDeposit,
+  recordWithdrawal,
+};

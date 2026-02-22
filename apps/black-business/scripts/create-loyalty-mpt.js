@@ -61,7 +61,7 @@ async function main() {
       MaximumAmount: "10000000000", // 10 billion max supply
       TransferFee: 0, // No fee on point transfers
       MPTokenMetadata: textToHex(JSON.stringify(metadata)),
-      Flags: 0x0010 + 0x0020, // lsfMPTCanTransfer + lsfMPTCanTrade
+      Flags: 0x0008 + 0x0010 + 0x0020, // tfMPTCanEscrow + tfMPTCanTrade + tfMPTCanTransfer
     };
 
     const createResponse = await client.submitAndWait(mptCreateTx, {

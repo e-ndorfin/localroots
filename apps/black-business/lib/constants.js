@@ -20,6 +20,8 @@ const RLUSD_ISSUER = process.env.NEXT_PUBLIC_RLUSD_ISSUER || "";
 // ---------------------------------------------------------------------------
 // Platform account addresses (public — safe to commit)
 // Populated after running: node scripts/init-platform.js
+// NOTE: Vault balances are tracked in SQLite (lib/db.js), not a Rust contract.
+// The VAULT_ADDRESS is still the XRPL account that holds pooled RLUSD on-chain.
 // ---------------------------------------------------------------------------
 const PLATFORM_MASTER_ADDRESS = process.env.NEXT_PUBLIC_PLATFORM_MASTER_ADDRESS || "";
 const VAULT_ADDRESS = process.env.NEXT_PUBLIC_VAULT_ADDRESS || "";

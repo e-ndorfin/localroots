@@ -6,7 +6,7 @@ Black-owned small businesses face disproportionate barriers to capital and custo
 
 **Key architectural decision**: The entire crypto/XRPL layer is invisible to **all** end users. Customers pay by card and see "reward points." Businesses see USD balances in their dashboard. Community lenders deposit and withdraw via Stripe and see USD balances and earned interest in their dashboard. No user ever touches crypto.
 
-**Hybrid persistence (Minimal Contract + SQLite)**: The Rust WASM smart contract is kept but shrunk to 4 vault functions only. All circle, loan, proof, tier, and interest logic lives in SQLite (`better-sqlite3`, no server, just a local file). XRPL handles the impressive on-chain primitives (RLUSD payments, MPT minting, escrows, credentials). SQLite handles application state that doesn't need to be on-chain. This is the pragmatic hackathon choice: the on-chain pieces are what judges care about; circle governance doesn't need to be a blockchain primitive.
+**SQLite-only persistence (no Rust contract)**: All application state — including vault balances — lives in SQLite (`sql.js`, no server, just a local file). The Rust WASM contract has been dropped; vault deposit/withdrawal tracking uses 4 SQLite helper functions that replace the contract 1:1. XRPL handles the impressive on-chain primitives (RLUSD payments, MPT minting, escrows, credentials). SQLite handles application state that doesn't need to be on-chain. This is the pragmatic hackathon choice: the on-chain pieces are what judges care about; circle governance and vault accounting don't need to be blockchain primitives.
 
 **Business crypto abstraction (Custodial Model — Option B)**: Businesses do **not** have their own XRPL wallets. The platform holds RLUSD on behalf of businesses in a platform-managed custodial account, tracking each business's balance in an internal ledger. Businesses see dollar amounts in their dashboard and can "withdraw" (which triggers a platform → Stripe Connect payout). This means:
 - No XRPL wallet creation per business
@@ -456,35 +456,18 @@ The on-chain enforcement of missed deadlines (previously `CancelAfter`) is repla
 - Query all accounts with `"REGISTERED_BUSINESS"` credential
 - Return list with metadata (name, category, location, visibility boost status)
 
-### B7. Vault Smart Contract (`packages/bedrock/vault-contract/src/lib.rs`)
+### B7. Vault Balance Tracking (SQLite — no Rust contract)
 
-**Slimmed to 4 functions only.** Circle, loan, proof, tier, and interest logic all moved to SQLite. The contract's only job is tracking vault balances on-chain — enough for transparency and to impress judges without 25 functions to debug at 3am.
+**Vault balances tracked entirely in SQLite.** The Rust WASM contract has been dropped. The `vault_deposits` table logs every deposit/withdrawal event, and 4 helper functions in `lib/db.js` replace the contract 1:1:
 
-Follows exact pattern from `packages/bedrock/contract/src/lib.rs`:
+- `getVaultTotal(db)` — net vault balance (deposits minus withdrawals)
+- `getLenderBalance(db, pseudonym)` — per-lender net balance
+- `recordDeposit(db, pseudonym, amountCents)` — insert deposit row
+- `recordWithdrawal(db, pseudonym, amountCents)` — insert withdrawal row (with balance check)
 
-```rust
-// Same imports and pattern as existing counter contract
-use xrpl_wasm_std::core::current_tx::contract_call::get_current_contract_call;
-use xrpl_wasm_std::core::current_tx::traits::ContractCallFields;
-use xrpl_wasm_std::core::data::codec::{get_data, set_data};
+The XRPL vault account still holds pooled RLUSD on-chain — only the balance *tracking* moved to SQLite.
 
-// Storage keys:
-// "vault_total"          -> u64 (total RLUSD pooled, base units)
-// "vault_members"        -> u32 (lender count)
-// "vault_member_{hash}"  -> u64 (individual lender contribution)
-
-// Exported functions (all #[unsafe(no_mangle)] pub extern "C" fn -> i32):
-// deposit(amount: u64)              — add to vault_total and vault_member_{hash}
-// withdraw(amount: u64)             — subtract from vault_total and vault_member_{hash}
-// get_vault_total()                 — returns vault_total (truncated to i32 for return type)
-// get_lender_balance(addr_hash: u32) — returns vault_member_{hash} balance
-```
-
-**Note on i32 return type**: XRPL contract functions return `i32`. For `get_vault_total()` and `get_lender_balance()`, store amounts in units of cents (not fractions) so u32 precision covers up to ~$21M — sufficient for Devnet demo.
-
-Cargo.toml mirrors `packages/bedrock/contract/Cargo.toml` exactly (same dependencies, same release profile).
-
-**SQLite tables handle everything else** (see `lib/db.js`).
+**SQLite tables handle everything** (see `lib/db.js`).
 
 ---
 
@@ -773,11 +756,11 @@ These are ready to use as-is or as reference patterns:
 **Goal**: Platform accounts have RLUSD trustlines and a loyalty MPT token exists on Devnet. After this phase, the platform can send/receive RLUSD (the stablecoin used for all money flows) and mint/transfer BBS loyalty points (the MPT token customers earn).
 
 **Build**:
-- [ ] `scripts/setup-trustlines.js` — RLUSD trustlines for all platform accounts
-- [ ] `scripts/create-loyalty-mpt.js` — Create BBS loyalty token issuance
-- [ ] `lib/xrpl/client.js` — Server-side XRPL WebSocket client singleton
-- [ ] `lib/xrpl/helpers.js` — `textToHex()`, `hexToText()`, `submitAndWait()` wrappers
-- [ ] Update `lib/constants.js` with **public** values only: wallet addresses, MPT issuance ID, RLUSD issuer address, RLUSD currency hex. Wallet seeds go in `.env.local` — never in constants.js, never committed to git.
+- [x] `scripts/setup-trustlines.js` — RLUSD trustlines for all platform accounts
+- [x] `scripts/create-loyalty-mpt.js` — Create BBS loyalty token issuance
+- [x] `lib/xrpl/client.js` — Server-side XRPL WebSocket client singleton
+- [x] `lib/xrpl/helpers.js` — `textToHex()`, `hexToText()`, `submitAndWait()` wrappers
+- [x] Update `lib/constants.js` with **public** values only: wallet addresses, MPT issuance ID, RLUSD issuer address, RLUSD currency hex. Wallet seeds go in `.env.local` — never in constants.js, never committed to git.
 
 **Verify**: Use `account_lines` to confirm trustlines exist on each platform account; use `account_objects` with `type: "mpt_issuance"` to confirm BBS MPT issuance is visible on Devnet.
 
@@ -811,19 +794,16 @@ These are ready to use as-is or as reference patterns:
 
 **Verify**: Full customer loop — pay by card → check RLUSD arrived to business → check points balance → redeem points.
 
-### PHASE 5: Vault Smart Contract + SQLite Setup
-**Goal**: 4-function vault contract on-chain for transparency; SQLite for all application state.
+### PHASE 5: Vault Balance Tracking + SQLite Setup *(SQLite-only — no Rust contract)*
+**Goal**: Vault balances tracked in SQLite alongside all other app state. No Rust WASM contract needed.
 
 **Build**:
-- [ ] `packages/bedrock/vault-contract/Cargo.toml` — mirror existing contract dependencies
-- [ ] `packages/bedrock/vault-contract/src/lib.rs` — 4 functions only: `deposit()`, `withdraw()`, `get_vault_total()`, `get_lender_balance()`
-- [ ] `packages/bedrock/vault-contract/abi.json`
-- [ ] Build + deploy to Devnet/AlphaNet
-- [ ] `lib/db.js` — `better-sqlite3` singleton, schema auto-runs on boot
-- [ ] SQLite schema: `businesses`, `circles`, `circle_members`, `loans`, `tranches`, `proofs`, `proof_approvals`, `borrower_tiers`, `points_ledger`, `lender_interest`
-- [ ] Add `blackbusiness.db` to `.gitignore`
+- [x] `lib/db.js` — `sql.js` singleton, schema auto-runs on boot
+- [x] SQLite schema: `businesses`, `circles`, `circle_members`, `loans`, `tranches`, `proofs`, `proof_approvals`, `borrower_tiers`, `points_ledger`, `lender_interest`, `vault_deposits` (11 tables)
+- [x] Vault helper functions in `lib/db.js`: `getVaultTotal()`, `getLenderBalance()`, `recordDeposit()`, `recordWithdrawal()` — replaces the 4 Rust contract functions 1:1
+- [x] Add `blackbusiness.db` to `.gitignore`
 
-**Verify**: Call `deposit()` and `get_vault_total()` via `ContractCall`, confirm state persists. Confirm SQLite file created and tables exist on app boot.
+**Verify**: Import `lib/db.js`, call `getDb()`, confirm all 11 tables exist. Test vault helpers: deposit, get total, get balance, withdraw with balance check.
 
 ### PHASE 6: SAV Vault Frontend (Lender Flow)
 **Goal**: Community lenders can deposit via Stripe, track vault health, see earned interest, and withdraw.
