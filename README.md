@@ -52,6 +52,56 @@ You don't need to touch `packages/` (smart contracts) or `apps/web-nuxt/` (Vue v
 
 ---
 
+## Black Business Support App setup (`apps/black-business/`)
+
+The main app lives in `apps/black-business/`. It needs XRPL Devnet accounts initialized before it can run.
+
+### 1. Install dependencies
+
+```bash
+pnpm install
+```
+
+### 2. Create `.env.local`
+
+```bash
+cp apps/black-business/.env.local.example apps/black-business/.env.local
+```
+
+### 3. Initialize platform wallets on Devnet
+
+```bash
+node apps/black-business/scripts/init-platform.js
+```
+
+This generates 4 funded Devnet wallets (RLUSD issuer, platform master, vault, rewards pool). Copy the output into `apps/black-business/.env.local`.
+
+### 4. Set up RLUSD trustlines
+
+```bash
+node apps/black-business/scripts/setup-trustlines.js
+```
+
+Establishes RLUSD trustlines on all platform accounts. Reads seeds from `.env.local`.
+
+### 5. Create the BBS loyalty token (MPT)
+
+```bash
+node apps/black-business/scripts/create-loyalty-mpt.js
+```
+
+Creates the BBS loyalty MPT issuance on Devnet. Copy the printed `NEXT_PUBLIC_LOYALTY_MPT_ID` into `.env.local`.
+
+### 6. Run the app
+
+```bash
+pnpm --filter black-business dev
+```
+
+**Note:** Devnet wallets expire after ~90 days. If addresses stop working, re-run steps 3-5 and update `.env.local`.
+
+---
+
 # Scaffold-XRP
 
 A Next.js-based development stack for building decentralized applications on XRPL with smart contracts. Built with Turborepo, inspired by Scaffold-ETH-2.
