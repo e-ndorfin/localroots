@@ -1,100 +1,52 @@
 "use client";
 
-import { useState } from "react";
 import Link from "next/link";
-import { useWallet } from "../providers/WalletProvider";
-import { WalletConnector } from "../WalletConnector";
-import { useWalletManager } from "../../hooks/useWalletManager";
+import { useEffect, useState } from "react";
+import { usePathname } from "next/navigation";
+import UserAvatarLink from "@/components/layout/UserAvatarLink";
 
-const NAV_LINKS = [
-  { href: "/directory", label: "Directory" },
-  { href: "/rewards", label: "Rewards" },
-  { href: "/business/register", label: "List Business" },
-  { href: "/vault", label: "Vault" },
-  { href: "/lending", label: "Lending" },
-];
+export default function Topbar({ balanceContent }) {
+  const [role, setRole] = useState("");
+  const pathname = usePathname();
 
-export function Header() {
-  const { isConnected, accountInfo, statusMessage } = useWallet();
-  useWalletManager();
-  const [mobileOpen, setMobileOpen] = useState(false);
+  useEffect(() => {
+    const saved = window.localStorage.getItem("bb-role");
+    setRole(saved || "");
+  }, []);
+
+  const isBusiness = role === "business";
+
+  function navClass(href) {
+    if (pathname === href) return "nav-link active";
+    if (href !== "/directory" && pathname.startsWith(href + "/")) return "nav-link active";
+    return "nav-link";
+  }
 
   return (
-    <header className="bg-primary text-white shadow-lg">
-      <div className="container mx-auto px-4">
-        <div className="flex items-center justify-between h-16">
-          <Link href="/" className="text-xl font-bold tracking-tight">
-            BBS
-          </Link>
-
-          {/* Desktop nav */}
-          <nav className="hidden md:flex items-center space-x-6">
-            {NAV_LINKS.map((link) => (
-              <Link
-                key={link.href}
-                href={link.href}
-                className="text-sm text-gray-300 hover:text-white transition-colors"
-              >
-                {link.label}
-              </Link>
-            ))}
-          </nav>
-
-          <div className="flex items-center space-x-4">
-            {isConnected && accountInfo && (
-              <span className="hidden md:inline text-xs text-gray-400 font-mono">
-                {accountInfo.address.slice(0, 8)}...{accountInfo.address.slice(-4)}
-              </span>
-            )}
-            <WalletConnector />
-
-            {/* Mobile menu button */}
-            <button
-              onClick={() => setMobileOpen(!mobileOpen)}
-              className="md:hidden p-2 text-gray-300 hover:text-white"
-            >
-              <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                {mobileOpen ? (
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
-                ) : (
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 6h16M4 12h16M4 18h16" />
-                )}
-              </svg>
-            </button>
-          </div>
-        </div>
-
-        {/* Mobile nav */}
-        {mobileOpen && (
-          <nav className="md:hidden pb-4 space-y-2">
-            {NAV_LINKS.map((link) => (
-              <Link
-                key={link.href}
-                href={link.href}
-                className="block text-sm text-gray-300 hover:text-white py-1"
-                onClick={() => setMobileOpen(false)}
-              >
-                {link.label}
-              </Link>
-            ))}
-          </nav>
+    <header className="topbar">
+      <Link className="app-name" href="/directory">LocalRoots</Link>
+      <nav className="nav-links nav-inline">
+        <Link className={navClass("/directory")} href="/directory">Browse</Link>
+        {isBusiness ? (
+          <>
+            <Link className={navClass("/business/funding")} href="/business/funding">Funding Requests</Link>
+            <Link className={navClass("/business/tracking")} href="/business/tracking">Business Metrics</Link>
+            <Link className={navClass("/business/storefront")} href="/business/storefront">Edit Storefront</Link>
+          </>
+        ) : (
+          <>
+            <Link className={navClass("/vault")} href="/vault">Community Fund</Link>
+            <Link className={navClass("/rewards")} href="/rewards">Rewards</Link>
+            <Link className={navClass("/lending")} href="/lending">Lending</Link>
+          </>
         )}
-      </div>
-
-      {/* Status bar */}
-      {statusMessage && (
-        <div
-          className={`px-4 py-2 text-sm text-center ${
-            statusMessage.type === "error"
-              ? "bg-red-600"
-              : statusMessage.type === "success"
-              ? "bg-green-600"
-              : "bg-blue-600"
-          }`}
-        >
-          {statusMessage.message}
+      </nav>
+      <div className="topbar-right">
+        <div className="site-balances">
+          {balanceContent || <div className="balance-pill"><strong>1,840 pts</strong></div>}
         </div>
-      )}
+        <UserAvatarLink />
+      </div>
     </header>
   );
 }
