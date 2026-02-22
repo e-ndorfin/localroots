@@ -4,7 +4,14 @@
 
 Black-owned small businesses face disproportionate barriers to capital and customer retention. This app solves both sides: a **Shared Asset Vault (SAV)** for community-funded microloans, and an **MPT loyalty rewards system** that drives repeat revenue — all built on XRPL with a crypto abstraction layer so customers and businesses never touch crypto directly.
 
-**Key architectural decision**: The entire crypto/XRPL layer is invisible to end users. Customers pay by card and see "reward points." Businesses receive RLUSD (1:1 USD stablecoin). Only community lenders interact with the blockchain directly.
+**Key architectural decision**: The entire crypto/XRPL layer is invisible to end users. Customers pay by card and see "reward points." Businesses see USD balances in their dashboard. Only community lenders interact with the blockchain directly.
+
+**Business crypto abstraction (Custodial Model — Option B)**: Businesses do **not** have their own XRPL wallets. The platform holds RLUSD on behalf of businesses in a platform-managed custodial account, tracking each business's balance in an internal ledger. Businesses see dollar amounts in their dashboard and can "withdraw" (which triggers a platform → Stripe Connect payout). This means:
+- No XRPL wallet creation per business
+- No RLUSD trustline per business
+- No `MPTokenAuthorize` per business (businesses never touch MPT — redemption flow goes Customer → Platform → RLUSD credited to business's internal balance)
+- Loan disbursements: escrow releases RLUSD from vault to a platform-controlled disbursement account; the business sees "$X milestone released" in their dashboard
+- The RLUSD stays in platform custody until the business withdraws
 
 ---
 
@@ -147,7 +154,7 @@ Listed in Platform Directory (visible to all customers)
   ↓
 Customers Earn Points on Purchases (incentivising return visits)
   ↓
-MPT Redeemed → Platform Converts to RLUSD (business gets USD value)
+MPT Redeemed → Platform Credits USD to Business Dashboard (custodial balance)
   ↓
 Optional: Purchase Boosted Visibility / Ads (platform ad revenue)
 ```
@@ -206,13 +213,13 @@ Checkout — Pay by Card (standard credit/debit, NO crypto knowledge needed)
   ↓
 [Backend] Platform Converts Card Payment → RLUSD (hidden from customer)
   ↓
-[Backend] RLUSD Paid Out to Business (minus transaction fee)
+[Backend] Platform Credits Business's Internal Balance (minus transaction fee)
   ↓
 Platform Awards Reward Points ("You earned 120 points" — no mention of tokens)
   ↓
 Redeem Points as Discount / Perk at any participating business
   ↓
-[Backend] Platform converts MPT → RLUSD to settle with business
+[Backend] Platform converts MPT → credits USD to business's internal balance
 ```
 
 ---
@@ -236,7 +243,7 @@ The entire crypto layer is invisible to customers and businesses. They interact 
 |---|---|
 | Card payment | Stripe charge → converted to RLUSD stablecoin |
 | Post-purchase | Platform mints MPT tokens to customer's internal account |
-| Point redemption | MPT → RLUSD swap executed, paid out to business |
+| Point redemption | MPT → RLUSD swap executed, USD credited to business's internal ledger |
 | Vault operations | RLUSD held in SAV, disbursed as microloans in installments |
 
 ---
@@ -293,9 +300,10 @@ Customer clicks "Pay $20" → Stripe charges card → Stripe webhook confirms
 **`api/payments/checkout/route.js`** — Creates Stripe PaymentIntent for the card charge
 **`api/payments/webhook/route.js`** — On Stripe `payment_intent.succeeded`:
   1. Calculate fee (e.g., 3% of $20 = $0.60 platform, $19.40 to business)
-  2. Send RLUSD Payment to business: `{ TransactionType: "Payment", Amount: { currency: RLUSD_HEX, value: "19.40", issuer: RLUSD_ISSUER } }`
-  3. Mint MPT loyalty tokens to customer: `{ TransactionType: "Payment", Amount: { mpt_issuance_id: LOYALTY_MPT_ID, value: "120" } }`
-  4. Fee portion splits: part to rewards pool, part to SAV, part to platform revenue
+  2. Credit business's internal ledger balance with $19.40 (custodial — no on-chain RLUSD transfer to business)
+  3. Platform converts card revenue to RLUSD and holds in platform custodial account (for on-chain accounting)
+  4. Mint MPT loyalty tokens to customer: `{ TransactionType: "Payment", Amount: { mpt_issuance_id: LOYALTY_MPT_ID, value: "120" } }`
+  5. Fee portion splits: part to rewards pool, part to SAV, part to platform revenue
 
 Pattern reference: `xrpl-js-python-simple-scripts/js/rlusd_transaction.js` for RLUSD payments, `xrpl-js-python-simple-scripts/js/mpt.js` lines 235-243 for MPT transfers.
 
@@ -326,8 +334,8 @@ const mptCreateTx = {
 
 **`api/loyalty/redeem/route.js`** — Customer spends points at a business:
 1. Customer's MPT transferred back to platform: `Payment` with `mpt_issuance_id`
-2. Platform sends equivalent RLUSD to business: RLUSD `Payment`
-3. Conversion rate: configurable (e.g., 100 points = $1 RLUSD)
+2. Platform credits equivalent USD to business's internal ledger balance (custodial — no on-chain transfer to business)
+3. Conversion rate: configurable (e.g., 100 points = $1)
 
 Query customer point balance: `account_objects` with `type: "mptoken"` — pattern from `mpt.js` lines 257-281.
 
@@ -423,9 +431,9 @@ If `CancelAfter` is reached without proof approval, the escrow auto-cancels and 
 1. Save business profile (name, category, location, ownership attestation)
 2. Platform issues `CredentialCreate` with type `"REGISTERED_BUSINESS"` — pattern from `credentials.js` lines 174-181
 3. Business accepts credential
-4. Set up RLUSD trustline for business account — pattern from `trustline.js`
-5. Business's account executes `MPTokenAuthorize` for the loyalty MPT — pattern from `mpt.js` lines 208-213
-6. Business appears in platform directory
+4. Create internal ledger entry for business (balance starts at $0)
+5. Business appears in platform directory
+- ~~No XRPL wallet, RLUSD trustline, or MPTokenAuthorize needed — custodial model (see Option B above)~~
 
 **`api/business/directory/route.js`**:
 - Query all accounts with `"REGISTERED_BUSINESS"` credential
@@ -507,7 +515,7 @@ The app renders different views based on user role (stored in local state + on-c
 | Role | Primary Pages | Crypto Exposure |
 |------|--------------|-----------------|
 | **Customer** | `/directory`, `/rewards`, `/rewards/redeem` | Zero — sees "points" and "card payment" only |
-| **Business Owner** | `/business/register`, `/business/dashboard`, `/directory` | Minimal — sees RLUSD payouts, no wallet needed |
+| **Business Owner** | `/business/register`, `/business/dashboard`, `/directory` | Zero — sees USD balances in dashboard (custodial), no wallet needed |
 | **Community Lender** | `/vault`, `/lending`, `/lending/[circleId]` | Full — connects wallet, interacts with XRPL directly |
 
 ### F2. Page Structure
@@ -524,7 +532,7 @@ The app renders different views based on user role (stored in local state + on-c
 
 **Business Registration (`/business/register`)** — Multi-step form: business name, category, location, ownership attestation (self-declaration checkbox). On submit → API issues credential, sets up trustlines.
 
-**Business Dashboard (`/business/dashboard`)** — Revenue stats (total RLUSD received), customer count, points redeemed at your business, optional "Boost Visibility" purchase.
+**Business Dashboard (`/business/dashboard`)** — Revenue stats (total USD earned, custodial balance), customer count, points redeemed at your business, "Withdraw" button (→ Stripe Connect payout), optional "Boost Visibility" purchase.
 
 **SAV Vault (`/vault`)** — Lender-only view. Shows total pooled capital, active loans, repayment health, earned interest. Deposit/withdraw RLUSD (principal + interest) forms. Requires wallet connection. Uses `WalletConnector` web component from existing app.
 
@@ -560,7 +568,7 @@ Rewards:
 
 Business:
 - `RegistrationForm.js` — Multi-step: info → attestation → confirmation
-- `RevenueDashboard.js` — RLUSD revenue stats, customer metrics
+- `RevenueDashboard.js` — USD revenue stats (from custodial ledger), customer metrics, withdraw button
 - `BoostVisibilityForm.js` — Optional ad purchase
 
 Vault (lender-facing, crypto-aware):
@@ -641,13 +649,13 @@ The central pooling and routing mechanism. Community contributions flow in, vett
 1. Create init script: generate platform wallets (master, vault, rewards pool) using Devnet faucet
 2. Set up RLUSD trustlines on all platform accounts — pattern from `trustline.js`
 3. Create loyalty MPT issuance — pattern from `mpt.js` lines 143-151
-4. Store generated MPT issuance ID and wallet addresses in `lib/constants.js`
+4. Store **public** values only in `lib/constants.js` (wallet addresses, MPT issuance ID, RLUSD issuer address, RLUSD currency hex). Store wallet seeds in `.env.local` — never in constants.js, never committed to git.
 5. Create `lib/xrpl/client.js` — server-side XRPL client for API routes
 6. Create `lib/xrpl/helpers.js` — `textToHex()`, `hexToText()`, submit helpers
-7. Verify: MPT created on Devnet, trustlines established
+7. Verify: use `account_lines` to confirm trustlines exist on each platform account; use `account_objects` with `type: "mpt_issuance"` to confirm the BBS MPT issuance is visible on Devnet
 
 ### Phase 3: Business Registration + Directory
-1. Build `api/business/register/route.js` — issue `CredentialCreate` for "REGISTERED_BUSINESS", set up RLUSD trustline for business, `MPTokenAuthorize` for loyalty MPT
+1. Build `api/business/register/route.js` — issue `CredentialCreate` for "REGISTERED_BUSINESS", create internal ledger entry (custodial model — no XRPL wallet, trustline, or MPT auth per business)
 2. Build `api/business/directory/route.js` — query accounts with business credential
 3. Build `/business/register` page with `RegistrationForm.js`
 4. Build `/directory` page with `BusinessCard.js`, `BusinessSearch.js`
@@ -788,22 +796,22 @@ These are ready to use as-is or as reference patterns:
 **Verify**: `pnpm --filter black-business dev` runs, landing page loads, wallet connects on Devnet.
 
 ### PHASE 2: RLUSD + MPT Token Infrastructure
-**Goal**: Platform accounts have RLUSD trustlines and a loyalty MPT token exists on Devnet.
+**Goal**: Platform accounts have RLUSD trustlines and a loyalty MPT token exists on Devnet. After this phase, the platform can send/receive RLUSD (the stablecoin used for all money flows) and mint/transfer BBS loyalty points (the MPT token customers earn).
 
 **Build**:
 - [ ] `scripts/setup-trustlines.js` — RLUSD trustlines for all platform accounts
 - [ ] `scripts/create-loyalty-mpt.js` — Create BBS loyalty token issuance
 - [ ] `lib/xrpl/client.js` — Server-side XRPL WebSocket client singleton
 - [ ] `lib/xrpl/helpers.js` — `textToHex()`, `hexToText()`, `submitAndWait()` wrappers
-- [ ] Update `lib/constants.js` with generated MPT issuance ID and wallet seeds
+- [ ] Update `lib/constants.js` with **public** values only: wallet addresses, MPT issuance ID, RLUSD issuer address, RLUSD currency hex. Wallet seeds go in `.env.local` — never in constants.js, never committed to git.
 
-**Verify**: Run scripts against Devnet → MPT issuance visible on explorer, trustlines confirmed.
+**Verify**: Use `account_lines` to confirm trustlines exist on each platform account; use `account_objects` with `type: "mpt_issuance"` to confirm BBS MPT issuance is visible on Devnet.
 
 ### PHASE 3: Business Registration + Directory
 **Goal**: Businesses can register and appear in a browsable directory.
 
 **Build**:
-- [ ] `app/api/business/register/route.js` — Issue REGISTERED_BUSINESS credential, set up trustline, authorize MPT
+- [ ] `app/api/business/register/route.js` — Issue REGISTERED_BUSINESS credential, create internal ledger entry (custodial model)
 - [ ] `app/api/business/directory/route.js` — Query registered businesses
 - [ ] `app/business/register/page.js` + `components/business/RegistrationForm.js`
 - [ ] `app/directory/page.js` + `components/directory/BusinessCard.js`, `BusinessSearch.js`
