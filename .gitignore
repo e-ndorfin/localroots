@@ -5,34 +5,48 @@ node_modules
 
 # Testing
 coverage
+htmlcov/
+.tox/
+.nox/
+.coverage
+.coverage.*
+.cache
+nosetests.xml
+coverage.xml
+*.cover
+*.py.cover
+.hypothesis/
+.pytest_cache/
+cover/
 
 # Next.js
 .next/
 out/
-build
-dist/
 
 # Nuxt
 .nuxt/
 .output/
 
-
 # Production
-build
+build/
+dist/
+downloads/
 
 # Misc
 .DS_Store
 *.pem
 
-# Debug
+# Debug / Logs
 npm-debug.log*
 yarn-debug.log*
 yarn-error.log*
 pnpm-debug.log*
+*.log
 
 # Local env files
 .env
 .env*.local
+.envrc
 
 # Vercel
 .vercel
@@ -42,19 +56,71 @@ pnpm-debug.log*
 
 # Python
 __pycache__/
-*.py[cod]
+*.py[codz]
 *$py.class
-*.egg-info/
-*.egg
+*.so
+.Python
+develop-eggs/
+eggs/
 .eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+share/python-wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+MANIFEST
+*.manifest
+*.spec
+pip-log.txt
+pip-delete-this-directory.txt
+*.mo
+*.pot
+local_settings.py
+db.sqlite3
+db.sqlite3-journal
+*.sqlite3
+instance/
+.webassets-cache
+.scrapy
+docs/_build/
+.pybuilder/
+.ipynb_checkpoints
+profile_default/
+ipython_config.py
+.pdm-python
+.pdm-build/
+.pixi
+__pypackages__/
+celerybeat-schedule
+celerybeat.pid
+*.sage.py
+.spyderproject
+.spyproject
+.ropeproject
+/site
+.mypy_cache/
+.dmypy.json
+dmypy.json
+.pyre/
+.pytype/
+cython_debug/
+.ruff_cache/
+.pypirc
+__marimo__/
+
+# Python environments
 venv/
 .venv/
 env/
-.env/
+ENV/
+env.bak/
+venv.bak/
 .python-version
-pip-log.txt
-pip-delete-this-directory.txt
-*.sqlite3
 
 # Rust/Bedrock
 target/
@@ -66,6 +132,9 @@ Cargo.lock
 .idea/
 *.swp
 *.swo
+.cursorignore
+.cursorindexingignore
+.abstra/
 
 # OS
 Thumbs.db
