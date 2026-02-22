@@ -1,12 +1,13 @@
 /**
  * Initialize platform wallets on XRPL Devnet.
  *
- * Generates and funds three platform accounts:
- *   1. Platform Master — issues credentials, manages MPT, collects fees
- *   2. SAV Vault — holds pooled lender funds (RLUSD)
- *   3. Rewards Pool — holds MPT tokens for distribution
+ * Generates and funds four accounts:
+ *   1. RLUSD Issuer — test RLUSD issuer (Devnet doesn't have mainnet's RLUSD issuer)
+ *   2. Platform Master — issues credentials, manages MPT, collects fees
+ *   3. SAV Vault — holds pooled lender funds (RLUSD)
+ *   4. Rewards Pool — holds MPT tokens for distribution
  *
- * After running, copy the output addresses and seeds into lib/constants.js.
+ * After running, copy the output into .env.local (seeds are secret, addresses are public).
  *
  * Usage: node scripts/init-platform.js
  */
@@ -35,18 +36,26 @@ async function main() {
     console.log("  BLACK BUSINESS SUPPORT — PLATFORM WALLET INITIALIZATION");
     console.log("=".repeat(60));
 
+    const rlusdIssuer = await fundAccount(client, "RLUSD Test Issuer");
     const master = await fundAccount(client, "Platform Master Account");
     const vault = await fundAccount(client, "SAV Vault Account");
     const rewards = await fundAccount(client, "Rewards Pool Account");
 
     console.log("\n" + "=".repeat(60));
-    console.log("\nCopy these values into lib/constants.js:\n");
-    console.log(`PLATFORM.MASTER_ADDRESS = "${master.address}";`);
-    console.log(`PLATFORM.MASTER_SEED    = "${master.seed}";`);
-    console.log(`PLATFORM.VAULT_ADDRESS  = "${vault.address}";`);
-    console.log(`PLATFORM.VAULT_SEED     = "${vault.seed}";`);
-    console.log(`PLATFORM.REWARDS_ADDRESS = "${rewards.address}";`);
-    console.log(`PLATFORM.REWARDS_SEED   = "${rewards.seed}";`);
+    console.log("\nCopy these values into .env.local:\n");
+    console.log(`# RLUSD test issuer (Devnet only — replaces mainnet issuer)`);
+    console.log(`NEXT_PUBLIC_RLUSD_ISSUER=${rlusdIssuer.address}`);
+    console.log(`RLUSD_ISSUER_SEED=${rlusdIssuer.seed}`);
+    console.log();
+    console.log(`# Platform account addresses (public)`);
+    console.log(`NEXT_PUBLIC_PLATFORM_MASTER_ADDRESS=${master.address}`);
+    console.log(`NEXT_PUBLIC_VAULT_ADDRESS=${vault.address}`);
+    console.log(`NEXT_PUBLIC_REWARDS_POOL_ADDRESS=${rewards.address}`);
+    console.log();
+    console.log(`# Platform account seeds (SECRET — never commit)`);
+    console.log(`PLATFORM_MASTER_SEED=${master.seed}`);
+    console.log(`VAULT_SEED=${vault.seed}`);
+    console.log(`REWARDS_POOL_SEED=${rewards.seed}`);
     console.log("\n" + "=".repeat(60));
   } catch (error) {
     console.error("Error:", error.message);
