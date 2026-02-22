@@ -4,6 +4,7 @@ import { requireAuth } from "@/lib/supabase/auth";
 import { getClient } from "@/lib/xrpl/client";
 import { textToHex, submitTx } from "@/lib/xrpl/helpers";
 import { PLATFORM_MASTER_ADDRESS } from "@/lib/constants";
+import { generateStorefrontImage } from "@/lib/openai/generateStorefrontImage";
 import * as xrpl from "xrpl";
 
 const CREDENTIAL_TYPE = textToHex("REGISTERED_BUSINESS");
@@ -104,9 +105,23 @@ export async function POST(request) {
       console.error("XRPL credential issuance failed:", xrplError.message);
     }
 
+    // Generate storefront image (non-fatal)
+    let imageUrl = null;
+    try {
+      imageUrl = await generateStorefrontImage({
+        businessId: business.id,
+        name,
+        category,
+        location,
+      });
+    } catch (imgError) {
+      console.error("Storefront image generation failed:", imgError.message);
+    }
+
     return NextResponse.json({
       ...business,
       credentialHash,
+      imageUrl,
     });
   } catch (err) {
     const status = err.status || 500;

@@ -22,7 +22,7 @@ export default function BusinessDetailPage() {
     const supabase = createClient();
     supabase
       .from("businesses")
-      .select("id, name, category, location, description, is_boosted, products")
+      .select("id, name, category, location, description, is_boosted, products, image_url")
       .eq("id", businessId)
       .single()
       .then(({ data }) => {
@@ -100,6 +100,15 @@ export default function BusinessDetailPage() {
       <Topbar />
 
       <main className="content">
+        {business.image_url && (
+          <section className="hero-image reveal">
+            <img
+              src={business.image_url}
+              alt={`${business.name} storefront`}
+              style={{ width: "100%", maxHeight: 360, objectFit: "cover", borderRadius: "var(--radius)" }}
+            />
+          </section>
+        )}
         <section className="page-head">
           <h1>{business.name}</h1>
           {business.is_boosted && <span className="biz-badge">Featured</span>}

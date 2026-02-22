@@ -21,6 +21,7 @@ CREATE TABLE businesses (
   owner_user_id UUID NOT NULL REFERENCES auth.users(id),
   credential_hash TEXT,
   balance_cents BIGINT NOT NULL DEFAULT 0,
+  image_url TEXT,
   is_boosted BOOLEAN NOT NULL DEFAULT false,
   created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
   updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
@@ -71,6 +72,7 @@ CREATE TABLE tranches (
   status TEXT NOT NULL DEFAULT 'pending',
   deadline TIMESTAMPTZ,
   released_at TIMESTAMPTZ,
+  xrpl_tx_hash TEXT,
   created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
   UNIQUE(loan_id, tranche_index)
 );

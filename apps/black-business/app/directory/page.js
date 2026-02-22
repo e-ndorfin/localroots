@@ -4,8 +4,6 @@ import Link from "next/link";
 import Script from "next/script";
 import { useEffect, useRef, useState } from "react";
 import Topbar from "@/components/layout/Header";
-import { businesses as mockBusinesses } from "@/lib/mockData";
-
 const DEFAULT_IMAGE = "https://images.unsplash.com/photo-1556742049-0cfed4f6a45d?w=600&h=400&fit=crop";
 
 export default function DirectoryPage() {
@@ -25,23 +23,15 @@ export default function DirectoryPage() {
       .catch(() => {});
   }, []);
 
-  // Merge: API-registered businesses first, then mockData for demo richness
-  const apiBizNormalized = apiBusinesses.map((b) => ({
+  const allBusinesses = apiBusinesses.map((b) => ({
     id: String(b.id),
     name: b.name,
     category: b.category || "Business",
     location: b.location || "Toronto, ON",
     description: b.description || "",
-    rating: "New",
-    reviews: 0,
-    image: DEFAULT_IMAGE,
+    image: b.imageUrl || DEFAULT_IMAGE,
     featured: b.isBoosted,
-    fromApi: true,
   }));
-
-  const mockIds = new Set(apiBizNormalized.map((b) => b.name.toLowerCase()));
-  const filteredMock = mockBusinesses.filter((b) => !mockIds.has(b.name.toLowerCase()));
-  const allBusinesses = [...apiBizNormalized, ...filteredMock];
 
   const displayedBusinesses = activeCategory === "All"
     ? allBusinesses
@@ -49,19 +39,23 @@ export default function DirectoryPage() {
 
   const allCategories = ["All", ...new Set(allBusinesses.map((b) => b.category))];
 
-  const mapPins = [
-    { id: "1", name: "Patois Toronto", brief: "Caribbean-inspired fine dining.", coords: [43.6532, -79.4112] },
-    { id: "2", name: "Kensington Natural", brief: "Organic health foods and beauty.", coords: [43.6547, -79.4006] },
-    { id: "3", name: "Crown & Glory Barbershop", brief: "Premium fades and beard shaping.", coords: [43.6426, -79.4291] },
-    { id: "4", name: "Afro-Bookshop", brief: "Books by Black authors.", coords: [43.6677, -79.4056] },
-    { id: "5", name: "Ubuntu Tech Hub", brief: "Co-working and tech incubator.", coords: [43.6510, -79.3660] },
-    { id: "6", name: "Mama Fifi's Kitchen", brief: "Authentic West African cuisine.", coords: [43.6763, -79.3492] },
-    { id: "7", name: "Heritage Dance Studio", brief: "Afrobeats and dance classes.", coords: [43.6564, -79.4163] },
-  ];
+  const mapPins = apiBusinesses
+    .filter((b) => b.lat && b.lng)
+    .map((b) => ({
+      id: String(b.id),
+      name: b.name,
+      brief: b.description || b.category || "",
+      coords: [b.lat, b.lng],
+    }));
 
   useEffect(() => {
-    if (!leafletReady || mapRef.current) return undefined;
-    if (!window.L) return undefined;
+    if (!leafletReady || !window.L) return undefined;
+
+    // Destroy and recreate map when pins change
+    if (mapRef.current) {
+      mapRef.current.remove();
+      mapRef.current = null;
+    }
 
     const map = window.L.map("browse-map", {
       scrollWheelZoom: true,
@@ -71,6 +65,25 @@ export default function DirectoryPage() {
       maxZoom: 19,
       attribution: "&copy; OpenStreetMap contributors",
     }).addTo(map);
+
+    // Show user's location
+    if (navigator.geolocation) {
+      navigator.geolocation.getCurrentPosition(
+        (pos) => {
+          const { latitude, longitude } = pos.coords;
+          const userIcon = window.L.divIcon({
+            html: '<div style="width:14px;height:14px;background:#3b82f6;border:3px solid #fff;border-radius:50%;box-shadow:0 0 6px rgba(59,130,246,0.5)"></div>',
+            iconSize: [14, 14],
+            iconAnchor: [7, 7],
+            className: "",
+          });
+          window.L.marker([latitude, longitude], { icon: userIcon })
+            .addTo(map)
+            .bindTooltip("You are here", { direction: "top" });
+        },
+        () => {} // silently ignore denied permission
+      );
+    }
 
     mapPins.forEach((store) => {
       const marker = window.L.marker(store.coords).addTo(map);
@@ -88,7 +101,7 @@ export default function DirectoryPage() {
       map.remove();
       mapRef.current = null;
     };
-  }, [leafletReady]);
+  }, [leafletReady, mapPins.length]);
 
   return (
     <>
@@ -110,10 +123,13 @@ export default function DirectoryPage() {
         </section>
 
         <section className="card-grid">
-          {displayedBusinesses.map((business, index) => (
+          {displayedBusinesses.length === 0 && (
+            <p className="muted col-span-full">No businesses registered yet.</p>
+          )}
+          {displayedBusinesses.map((business) => (
             <article className="biz-card reveal" key={business.id}>
               <div className="card-image-wrap">
-                {business.fromApi ? <span className="biz-badge">Registered</span> : business.featured || business.badge ? <span className="biz-badge">{business.badge || (index % 2 === 0 ? "Top Rated" : "Sponsored")}</span> : null}
+                {business.featured ? <span className="biz-badge">Featured</span> : null}
                 <Link href={`/directory/${business.id}`}>
                   <img src={business.image} alt={business.name} />
                 </Link>
@@ -121,7 +137,7 @@ export default function DirectoryPage() {
               <div className="card-body">
                 <h2>{business.name}</h2>
                 <p>{business.description}</p>
-                <p className="rating">&#9733; {business.rating} ({business.reviews} reviews)</p>
+                <p className="muted text-xs">{business.category}</p>
               </div>
             </article>
           ))}

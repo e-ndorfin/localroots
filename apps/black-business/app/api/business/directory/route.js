@@ -18,7 +18,7 @@ export async function GET(request) {
     let query = supabase
       .from("businesses")
       .select(
-        "id, name, category, location, description, owner_user_id, balance_cents, is_boosted, lat, lng, created_at"
+        "id, name, category, location, description, owner_user_id, balance_cents, is_boosted, lat, lng, image_url, created_at"
       );
 
     if (category) {
@@ -47,6 +47,7 @@ export async function GET(request) {
       isBoosted: row.is_boosted,
       lat: row.lat,
       lng: row.lng,
+      imageUrl: row.image_url,
       createdAt: row.created_at,
     }));
 
