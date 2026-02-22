@@ -122,6 +122,11 @@ env.bak/
 venv.bak/
 .python-version
 
+# SQLite (Black Business app)
+blackbusiness.db
+blackbusiness.db-wal
+blackbusiness.db-shm
+
 # Rust/Bedrock
 target/
 Cargo.lock
