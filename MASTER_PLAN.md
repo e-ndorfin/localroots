@@ -34,8 +34,10 @@ nsbehacks/
             status/route.js       # Vault health metrics
           lending/
             apply/route.js        # Loan application processing
-            disburse/route.js     # Milestone-based tranche release
-            repay/route.js        # Repayment processing
+            disburse/route.js     # Milestone-based tranche release (escrow creation)
+            submit-proof/route.js # Borrower uploads milestone proof
+            approve-proof/route.js # Circle member approves proof → escrow release
+            repay/route.js        # Repayment processing (principal + interest)
           business/
             register/route.js     # Business registration + credential issuance
             directory/route.js    # Business directory listing
@@ -110,12 +112,25 @@ Apply for Microloan via SAV (group provides social guarantee)
   ↓
 SAV Reviews & Approves (vault checks available capital)
   ↓
-Receive Funds in Installments (milestone-based, not all at once)
+Receive 1st Tranche (e.g. $1,000 — locked in escrow until milestone met)
   ↓
-List on Platform + Enable MPT (participate in loyalty program)
+Complete Milestone + Submit Proof (receipt, invoice, photo of equipment, etc.)
   ↓
-Repay Loan on Schedule (repayments refill SAV, unlock bigger loans)
+Circle Members Verify Proof (peer review — at least 2/4 members approve)
+  ↓
+Escrow Released → Receive Next Tranche (repeat for each milestone)
+  ↓
+All Tranches Disbursed → List on Platform + Enable MPT
+  ↓
+Repay Loan + Interest on Schedule (repayments return to SAV with interest → lenders earn yield)
 ```
+
+**Milestone Proof Examples**:
+- Tranche 1 ($1,000): Upload receipt for equipment purchase or lease signing
+- Tranche 2 ($1,000): Show proof of inventory purchase or contractor payment
+- Tranche 3 ($1,000): Demonstrate operational milestone (first sale, storefront photo, etc.)
+
+Each tranche is held in an XRPL escrow with a crypto-condition. Circle members provide the fulfillment (proof approval) to release funds. If a milestone is not met within the deadline, funds return to the SAV automatically.
 
 ### Flow 1B: Business Owner (Established / Loyalty Program Only)
 
@@ -144,15 +159,40 @@ Community Member Arrives — wants to support Black economic empowerment
   ↓
 Create Anonymous Account (no real-world ID, pseudonym model)
   ↓
-Contribute to Shared Asset Vault / SAV (funds pooled with other lenders)
+Contribute RLUSD to Shared Asset Vault / SAV (funds pooled with other lenders)
+  ↓
+Smart Contract Records Contribution (tracks exact amount per lender)
   ↓
 Automated Lending Logic Routes Capital (matched to vetted lending circles)
   ↓
-Dashboard: Track Contributions (repayment health, vault activity, impact)
+Loan Disbursed in Milestone-Gated Tranches (escrow per tranche, proof required)
   ↓
-Repayments Return to Vault (capital recycles)
+Dashboard: Track Contributions (which loans your capital funded, milestone progress)
   ↓
-Re-contribute or Withdraw
+Borrower Repays Loan + Interest → Returns to SAV (e.g. 5% APR)
+  ↓
+Lender Receives Pro-Rata Share of Interest (proportional to contribution)
+  ↓
+Re-contribute or Withdraw (principal + earned interest)
+```
+
+**Lender → Borrower → Lender Full Cycle (Smart Contract Managed)**:
+```
+Lender deposits $5,000 RLUSD → SAV Vault (smart contract records contribution)
+  ↓
+Borrower approved for $3,000 loan (3 tranches × $1,000)
+  ↓
+Tranche 1: $1,000 locked in XRPL escrow → borrower submits proof → circle approves → escrow released
+  ↓
+Tranche 2: $1,000 locked in XRPL escrow → borrower submits proof → circle approves → escrow released
+  ↓
+Tranche 3: $1,000 locked in XRPL escrow → borrower submits proof → circle approves → escrow released
+  ↓
+Borrower repays $3,150 ($3,000 principal + $150 interest at 5%)
+  ↓
+$3,150 returns to SAV vault → smart contract distributes interest pro-rata to lenders
+  ↓
+Lender can withdraw original $5,000 + earned interest share, or let it recycle into new loans
 ```
 
 ### Flow 3: Customer / Shopper (Points Earner)
@@ -316,10 +356,25 @@ The SAV is an XRPL account that holds RLUSD pooled from community lenders. The v
 2. Check graduated tier via `ContractCall` to `get_borrower_tier()`
 3. Verify vault has sufficient capital
 4. Create loan record via `ContractCall` to `request_loan()`
-5. Set up milestone escrows for installment disbursement
+5. Calculate interest (e.g. 5% APR → total repayment = principal × 1.05)
+6. Split loan into milestone tranches (e.g. $3,000 loan = 3 × $1,000)
+7. Create XRPL escrow for first tranche only (next escrow created after previous milestone met)
 
-**Milestone-Based Disbursement** (Escrow pattern):
-Each loan tranche is an XRPL escrow with time + crypto condition:
+**Milestone-Gated Proof-Based Disbursement** (Escrow pattern):
+
+Each tranche requires the borrower to submit proof of a business-related milestone before funds are released. This ensures capital is used productively and gives the lending circle oversight.
+
+**Proof flow per tranche**:
+1. Escrow created with crypto-condition (SHA256 from `five-bells-condition`)
+2. Borrower completes milestone (e.g. buys equipment, signs lease, purchases inventory)
+3. Borrower uploads proof via `api/lending/submit-proof/route.js` (receipt, invoice, photo)
+4. Circle members review proof (at least 2 of 4+ members must approve)
+5. On approval, platform provides escrow fulfillment → `EscrowFinish` releases funds to borrower
+6. Smart contract records disbursement via `record_disbursement()`
+7. Next tranche escrow is created, cycle repeats
+
+**Milestone proof types**: receipt/invoice upload, photo of purchased equipment/inventory, signed lease or contract, bank statement showing business expense, screenshot of completed task.
+
 ```javascript
 // Pattern from escrow.js lines 150-161
 const escrowTx = {
@@ -328,15 +383,33 @@ const escrowTx = {
   Destination: borrowerAddress,
   Amount: xrpToDrops(trancheAmount),  // or RLUSD amount
   FinishAfter: isoTimeToRippleTime(milestoneDate),
+  CancelAfter: isoTimeToRippleTime(deadlineDate),  // Auto-return to vault if milestone not met
   Condition: condition,  // SHA256 condition from five-bells-condition
 };
 ```
-Tranche release requires circle member approval (providing fulfillment) — pattern from `escrow.js` lines 176-187.
+
+If `CancelAfter` is reached without proof approval, the escrow auto-cancels and funds return to the SAV vault. This protects lender capital from stalled loans.
+
+**`api/lending/submit-proof/route.js`** — Borrower submits milestone proof:
+1. Validate borrower has an active loan with pending milestone
+2. Store proof metadata (type, description, file reference)
+3. Notify circle members for review
+4. `ContractCall` to `submit_proof(loan_id, tranche_id, proof_hash)`
+
+**`api/lending/approve-proof/route.js`** — Circle member approves milestone proof:
+1. Verify caller is a circle member (check credential)
+2. Record approval via `ContractCall` to `approve_proof(loan_id, tranche_id)`
+3. If approval threshold met (e.g. 2/4 members), provide escrow fulfillment
+4. `EscrowFinish` with fulfillment releases tranche to borrower
+5. Create next tranche escrow if more milestones remain
 
 **`api/lending/repay/route.js`**:
-1. Borrower sends RLUSD to vault account
+1. Borrower sends RLUSD to vault account (principal + interest portion)
 2. `ContractCall` to `record_repayment()` updates loan state
-3. On full repayment, borrower tier upgraded via `upgrade_tier()`
+3. Smart contract calculates interest earned and attributes pro-rata to lenders
+4. `ContractCall` to `distribute_interest(loan_id)` updates each lender's earned interest balance
+5. On full repayment (all principal + interest), borrower tier upgraded via `upgrade_tier()`
+6. Lenders can now withdraw their principal + earned interest from the vault
 
 **Credential-Based Circle Membership**:
 - Platform issues `CredentialCreate` with type `"CIRCLE_MEMBER"` to each circle member
@@ -369,32 +442,54 @@ use xrpl_wasm_std::core::current_tx::traits::ContractCallFields;
 use xrpl_wasm_std::core::data::codec::{get_data, set_data};
 
 // Storage keys:
-// "vault_total"                    -> u64 (total RLUSD in vault, base units)
-// "vault_members"                  -> u32 (lender count)
-// "vault_member_{hash}"            -> u64 (individual contribution)
-// "circle_count"                   -> u32 (total circles)
-// "circle_{id}_size"               -> u32 (member count)
-// "circle_{id}_status"             -> u8  (0=forming, 1=active, 2=closed)
-// "loan_count"                     -> u32 (total loans)
-// "loan_{id}_amount"               -> u64
-// "loan_{id}_disbursed"            -> u64
-// "loan_{id}_repaid"               -> u64
-// "loan_{id}_status"               -> u8  (0=pending, 1=active, 2=repaid, 3=defaulted)
-// "borrower_{hash}_tier"           -> u8  (1=micro, 2=small, 3=medium)
-// "borrower_{hash}_completed"      -> u32 (successful repayments count)
+// --- Vault ---
+// "vault_total"                         -> u64 (total RLUSD in vault, base units)
+// "vault_members"                       -> u32 (lender count)
+// "vault_member_{hash}"                 -> u64 (individual contribution)
+// "vault_member_{hash}_interest"        -> u64 (earned interest, withdrawable)
+// "vault_interest_rate"                 -> u32 (basis points, e.g. 500 = 5% APR)
+// --- Circles ---
+// "circle_count"                        -> u32 (total circles)
+// "circle_{id}_size"                    -> u32 (member count)
+// "circle_{id}_status"                  -> u8  (0=forming, 1=active, 2=closed)
+// --- Loans ---
+// "loan_count"                          -> u32 (total loans)
+// "loan_{id}_amount"                    -> u64 (principal)
+// "loan_{id}_interest_due"              -> u64 (total interest owed)
+// "loan_{id}_tranches"                  -> u32 (number of milestone tranches)
+// "loan_{id}_tranche_{n}_amount"        -> u64 (amount per tranche)
+// "loan_{id}_tranche_{n}_status"        -> u8  (0=pending, 1=proof_submitted, 2=approved, 3=released, 4=cancelled)
+// "loan_{id}_tranche_{n}_proof"         -> u64 (proof hash)
+// "loan_{id}_tranche_{n}_approvals"     -> u32 (number of circle member approvals)
+// "loan_{id}_disbursed"                 -> u64
+// "loan_{id}_repaid"                    -> u64
+// "loan_{id}_status"                    -> u8  (0=pending, 1=active, 2=repaid, 3=defaulted)
+// --- Borrower ---
+// "borrower_{hash}_tier"                -> u8  (1=micro, 2=small, 3=medium)
+// "borrower_{hash}_completed"           -> u32 (successful repayments count)
 
 // Exported functions (all #[unsafe(no_mangle)] pub extern "C" fn -> i32):
+// --- Vault ---
 // deposit(amount: u64)
-// withdraw(amount: u64)
+// withdraw(amount: u64)                         — withdraws principal + earned interest
 // get_vault_total()
+// get_lender_balance(addr_hash: u32)             — returns contribution + earned interest
+// --- Circles ---
 // create_circle()
 // join_circle(circle_id: u32)
 // get_circle_status(circle_id: u32)
-// request_loan(circle_id: u32, amount: u64)
-// record_disbursement(loan_id: u32, amount: u64)
-// record_repayment(loan_id: u32, amount: u64)
-// get_borrower_tier(addr_hash: u32)
+// --- Loans ---
+// request_loan(circle_id: u32, amount: u64, num_tranches: u32)
+// record_disbursement(loan_id: u32, tranche_id: u32, amount: u64)
+// record_repayment(loan_id: u32, amount: u64)    — tracks principal + interest portions
+// distribute_interest(loan_id: u32)               — pro-rata interest to lenders on repayment
 // get_loan_status(loan_id: u32)
+// --- Milestone Proofs ---
+// submit_proof(loan_id: u32, tranche_id: u32, proof_hash: u64)
+// approve_proof(loan_id: u32, tranche_id: u32)   — circle member approval (increments count)
+// get_tranche_status(loan_id: u32, tranche_id: u32)
+// --- Borrower ---
+// get_borrower_tier(addr_hash: u32)
 // upgrade_tier(addr_hash: u32)
 // get_active_loans()
 ```
@@ -431,11 +526,11 @@ The app renders different views based on user role (stored in local state + on-c
 
 **Business Dashboard (`/business/dashboard`)** — Revenue stats (total RLUSD received), customer count, points redeemed at your business, optional "Boost Visibility" purchase.
 
-**SAV Vault (`/vault`)** — Lender-only view. Shows total pooled capital, active loans, repayment health. Deposit/withdraw RLUSD forms. Requires wallet connection. Uses `WalletConnector` web component from existing app.
+**SAV Vault (`/vault`)** — Lender-only view. Shows total pooled capital, active loans, repayment health, earned interest. Deposit/withdraw RLUSD (principal + interest) forms. Requires wallet connection. Uses `WalletConnector` web component from existing app.
 
 **Lending Circles (`/lending`)** — Browse/create circles. Join a forming circle. View active loans per circle.
 
-**Circle Detail (`/lending/[circleId]`)** — Members list, active loans, tranche progress visualization, repayment status. "Release Tranche" button for circle members (provides escrow fulfillment).
+**Circle Detail (`/lending/[circleId]`)** — Members list, active loans, tranche progress visualization (per-milestone proof status), repayment status. Borrowers upload proof here. Circle members review and approve proof to release tranches. Shows interest owed and repayment schedule.
 
 ### F3. Key Components
 
@@ -472,14 +567,16 @@ Vault (lender-facing, crypto-aware):
 - `VaultOverview.js` — Total pooled, health metrics, charts
 - `VaultDepositForm.js` — RLUSD deposit amount input, wallet sign
 - `VaultWithdrawForm.js` — Withdrawal request
-- `LenderDashboard.js` — Personal contribution, impact tracking
+- `LenderDashboard.js` — Personal contribution, earned interest, funded loans, impact tracking
 
 Lending (lender/borrower-facing):
 - `CircleList.js` — Browse/create circles
 - `CircleDetail.js` — Members, loans, guarantor relationships
-- `LoanRequestForm.js` — Amount input bounded by graduated tier
-- `TrancheProgress.js` — Visual milestone tracker per loan
-- `RepaymentForm.js` — RLUSD repayment to vault
+- `LoanRequestForm.js` — Amount input bounded by graduated tier, shows interest rate and repayment schedule
+- `TrancheProgress.js` — Visual milestone tracker per loan (pending → proof submitted → approved → released)
+- `ProofUpload.js` — Borrower uploads milestone proof (receipt, invoice, photo, etc.)
+- `ProofReview.js` — Circle member reviews submitted proof and approves/rejects
+- `RepaymentForm.js` — RLUSD repayment to vault (principal + interest)
 - `TierIndicator.js` — Graduated access tier visualization (Micro → Small → Medium)
 
 ### F4. State Management
@@ -517,13 +614,15 @@ colors: {
 
 ## Shared Asset Vault (SAV) — Capital Engine
 
-The central pooling and routing mechanism. Community contributions flow in, vetted microloans flow out. Repayments refill the vault, enabling perpetual capital access for the community.
+The central pooling and routing mechanism. Community contributions flow in, vetted microloans flow out. Repayments (with interest) refill the vault, enabling perpetual and growing capital access for the community. Lenders earn yield on their contributions.
 
 | | Detail |
-|---|---|
-| **Inflows** | Anonymous lender contributions aggregated into pool. Loan repayments from borrowers return to vault. Transaction fee share reinvested. |
-| **Routing Logic** | Lending circle requests evaluated. Vault health threshold checked. Capital allocated in installments tied to business milestones. |
-| **Outflows** | Installment disbursements to approved borrowers. Reward points pool funding. Platform operating revenue (fee share). |
+|-|-|
+| **Inflows** | Anonymous lender contributions aggregated into pool. Loan repayments (principal + interest) from borrowers return to vault. Transaction fee share reinvested. |
+| **Routing Logic** | Lending circle requests evaluated. Vault health threshold checked. Capital allocated in milestone-gated escrow tranches (proof required per tranche). |
+| **Outflows** | Milestone-gated tranche disbursements to approved borrowers (escrow per tranche). Reward points pool funding. Platform operating revenue (fee share). |
+| **Interest** | Borrowers repay principal + interest (configurable, e.g. 5% APR). Interest distributed pro-rata to lenders based on contribution size. Smart contract tracks each lender's share. |
+| **Milestone Gating** | Each loan tranche locked in XRPL escrow. Borrower submits proof (receipt/invoice/photo). Circle members verify and approve (provide escrow fulfillment). Unmet milestones → funds auto-return to vault after deadline. |
 
 ---
 
@@ -568,29 +667,33 @@ The central pooling and routing mechanism. Community contributions flow in, vett
 
 ### Phase 5: Vault Smart Contract
 1. Create `packages/bedrock/vault-contract/` with `Cargo.toml` (mirror existing contract's dependencies)
-2. Implement vault state functions: `deposit()`, `withdraw()`, `get_vault_total()`
+2. Implement vault state functions: `deposit()`, `withdraw()`, `get_vault_total()`, `get_lender_balance()`
 3. Implement circle functions: `create_circle()`, `join_circle()`, `get_circle_status()`
 4. Implement loan tracking: `request_loan()`, `record_disbursement()`, `record_repayment()`, `get_borrower_tier()`, `upgrade_tier()`
-5. Build: `cargo build --release --target wasm32-unknown-unknown`
-6. Deploy to Devnet (or AlphaNet if smart contracts not on Devnet)
+5. Implement milestone proof functions: `submit_proof()`, `approve_proof()`, `get_tranche_status()`
+6. Implement interest tracking: `distribute_interest()` — pro-rata interest allocation to lenders on repayment
+7. Build: `cargo build --release --target wasm32-unknown-unknown`
+8. Deploy to Devnet (or AlphaNet if smart contracts not on Devnet)
 
 ### Phase 6: SAV Vault Frontend (Lender Flow)
 1. Build `api/vault/deposit/route.js`, `api/vault/withdraw/route.js`, `api/vault/status/route.js`
 2. Build `useVault()` hook
 3. Build `/vault` page with `VaultOverview.js`, `VaultDepositForm.js`, `VaultWithdrawForm.js`
-4. Build `LenderDashboard.js` — contribution tracking, impact metrics
-5. Verify: lender deposits RLUSD → vault total increases → lender can withdraw
+4. Build `LenderDashboard.js` — contribution tracking, earned interest display, impact metrics
+5. Verify: lender deposits RLUSD → vault total increases → lender can withdraw principal + interest
 
 ### Phase 7: Lending Circles + Microloans (Borrower Flow)
-1. Build `api/lending/apply/route.js` — loan application with graduated tier check
-2. Build `api/lending/disburse/route.js` — create milestone escrows using `EscrowCreate` + conditions from `escrow.js`
-3. Build `api/lending/repay/route.js` — process repayment, update tier
-4. Build credential issuance for circle membership — pattern from `credentials.js` lines 174-249
-5. Build `useLendingCircle()` hook
-6. Build `/lending` page with `CircleList.js`
-7. Build `/lending/[circleId]` with `CircleDetail.js`, `LoanRequestForm.js`, `TrancheProgress.js`, `RepaymentForm.js`
-8. Build `TierIndicator.js` — graduated access visualization
-9. Verify: create circle → join → request loan → release tranches → repay → tier upgrades
+1. Build `api/lending/apply/route.js` — loan application with graduated tier check, interest rate calculation, tranche splitting
+2. Build `api/lending/disburse/route.js` — create milestone escrows using `EscrowCreate` + conditions + `CancelAfter` deadline from `escrow.js`
+3. Build `api/lending/submit-proof/route.js` — borrower uploads milestone proof (receipt, invoice, photo)
+4. Build `api/lending/approve-proof/route.js` — circle member reviews and approves proof → on threshold met, `EscrowFinish` releases tranche
+5. Build `api/lending/repay/route.js` — process repayment (principal + interest), distribute interest pro-rata to lenders
+6. Build credential issuance for circle membership — pattern from `credentials.js` lines 174-249
+7. Build `useLendingCircle()` hook
+8. Build `/lending` page with `CircleList.js`
+9. Build `/lending/[circleId]` with `CircleDetail.js`, `LoanRequestForm.js`, `TrancheProgress.js`, `RepaymentForm.js`, `ProofUpload.js`, `ProofReview.js`
+10. Build `TierIndicator.js` — graduated access visualization
+11. Verify: create circle → join → request loan → submit proof → circle approves → tranche released → repay with interest → lenders earn yield → tier upgrades
 
 ### Phase 8: Business Dashboard + Ads
 1. Build `/business/dashboard` with `RevenueDashboard.js` — RLUSD revenue stats
@@ -623,17 +726,21 @@ The central pooling and routing mechanism. Community contributions flow in, vett
 4. Withdraw contribution
 5. Verify RLUSD returned to lender wallet
 
-### Test Flow 3: Full Lending Cycle
+### Test Flow 3: Full Lending Cycle (Proof-Gated Milestones + Interest)
 1. Create lending circle with 4 test wallets
 2. All members accept circle membership credentials
-3. Deposit RLUSD into vault as lenders
-4. Borrower requests microloan (Tier 1: micro)
-5. Verify milestone escrows created
-6. Release first tranche (time condition met)
-7. Release second tranche (circle member provides fulfillment)
-8. Borrower repays full loan
-9. Verify tier upgraded to Tier 2
-10. Verify repayment returned to vault
+3. Deposit RLUSD into vault as lenders (e.g. $5,000 total)
+4. Borrower requests microloan of $3,000 (Tier 1: micro, 3 tranches × $1,000, 5% interest)
+5. Verify first tranche escrow created (with CancelAfter deadline)
+6. Borrower submits proof for tranche 1 (e.g. equipment receipt)
+7. 2 of 4 circle members approve proof
+8. Verify escrow released → borrower receives $1,000
+9. Repeat proof→approve→release for tranche 2 and 3
+10. Borrower repays $3,150 ($3,000 principal + $150 interest)
+11. Verify interest distributed pro-rata to lenders
+12. Verify lender can withdraw principal + earned interest share
+13. Verify borrower tier upgraded to Tier 2
+14. Verify repayment returned to vault (capital recycled for next loan)
 
 ---
 
@@ -734,29 +841,31 @@ These are ready to use as-is or as reference patterns:
 **Verify**: Call each contract function via `ContractCall` and check state persistence.
 
 ### PHASE 6: SAV Vault Frontend (Lender Flow)
-**Goal**: Community lenders can deposit RLUSD, track vault health, and withdraw.
+**Goal**: Community lenders can deposit RLUSD, track vault health, see earned interest, and withdraw.
 
 **Build**:
 - [ ] `app/api/vault/deposit/route.js`, `withdraw/route.js`, `status/route.js`
 - [ ] `app/vault/page.js` + `components/vault/VaultOverview.js`, `VaultDepositForm.js`, `VaultWithdrawForm.js`
-- [ ] `components/vault/LenderDashboard.js`
+- [ ] `components/vault/LenderDashboard.js` — shows contribution, earned interest, funded loans
 - [ ] `hooks/useVault.js`
 
-**Verify**: Deposit RLUSD → vault total increases → withdraw → RLUSD returned.
+**Verify**: Deposit RLUSD → vault total increases → withdraw → RLUSD returned (principal + earned interest).
 
 ### PHASE 7: Lending Circles + Microloans
-**Goal**: Borrowers can join circles, request loans, receive installments, repay, and graduate to larger loans.
+**Goal**: Borrowers join circles, request loans disbursed in proof-gated milestone tranches, repay with interest that flows back to lenders.
 
 **Build**:
 - [ ] `app/api/lending/apply/route.js`, `disburse/route.js`, `repay/route.js`
+- [ ] `app/api/lending/submit-proof/route.js` — borrower uploads milestone proof
+- [ ] `app/api/lending/approve-proof/route.js` — circle members review & approve proof → triggers escrow release
 - [ ] Circle credential issuance (CredentialCreate + CredentialAccept + DepositPreauth)
-- [ ] Milestone escrow creation (EscrowCreate with conditions) + release (EscrowFinish with fulfillment)
+- [ ] Milestone escrow creation (EscrowCreate with conditions + CancelAfter deadline) + release (EscrowFinish with fulfillment on proof approval)
 - [ ] `app/lending/page.js` + `components/lending/CircleList.js`
-- [ ] `app/lending/[circleId]/page.js` + `CircleDetail.js`, `LoanRequestForm.js`, `TrancheProgress.js`, `RepaymentForm.js`
+- [ ] `app/lending/[circleId]/page.js` + `CircleDetail.js`, `LoanRequestForm.js`, `TrancheProgress.js`, `RepaymentForm.js`, `ProofUpload.js`, `ProofReview.js`
 - [ ] `components/lending/TierIndicator.js`
 - [ ] `hooks/useLendingCircle.js`
 
-**Verify**: Full lending cycle — create circle → join → request loan → release tranches → repay → tier upgrade.
+**Verify**: Full lending cycle — create circle → join → request loan → submit proof for tranche 1 → circle approves → escrow releases funds → repeat for each tranche → repay with interest → lenders earn yield → tier upgrade.
 
 ### PHASE 8: Business Dashboard + Ad Revenue
 **Goal**: Business owners see revenue stats and can optionally boost visibility.
