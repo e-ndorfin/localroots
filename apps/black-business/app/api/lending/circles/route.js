@@ -31,7 +31,7 @@ export async function GET() {
 
 export async function POST(request) {
   try {
-    await requireAuth();
+    const user = await requireAuth();
     const { name, maxMembers } = await request.json();
 
     if (!name) {
@@ -47,6 +47,13 @@ export async function POST(request) {
       .single();
 
     if (error) throw error;
+
+    // Add creator as first member
+    const { error: memberError } = await supabase
+      .from("circle_members")
+      .insert({ circle_id: circle.id, member_user_id: user.id });
+
+    if (memberError) throw memberError;
 
     return NextResponse.json({ circle }, { status: 201 });
   } catch (err) {

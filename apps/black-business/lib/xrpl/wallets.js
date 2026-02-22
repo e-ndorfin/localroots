@@ -8,7 +8,7 @@
 const xrpl = require("xrpl");
 const { getClient } = require("./client");
 const { submitTx } = require("./helpers");
-const { LOYALTY_MPT_ID } = require("../constants");
+const { LOYALTY_MPT_ID, RLUSD_CURRENCY_HEX, RLUSD_ISSUER } = require("../constants");
 
 /**
  * Return (or create) a custodial XRPL wallet for the given customer.
@@ -57,6 +57,28 @@ async function getOrCreateCustomerWallet(supabase, userId) {
       authorized = true;
     } catch (err) {
       console.error("MPTokenAuthorize failed for new customer wallet:", err.message);
+    }
+  }
+
+  // 3b. Set up RLUSD trustline so wallet can receive RLUSD disbursements
+  if (RLUSD_ISSUER) {
+    try {
+      await submitTx(
+        {
+          TransactionType: "TrustSet",
+          Account: newWallet.address,
+          LimitAmount: {
+            currency: RLUSD_CURRENCY_HEX,
+            issuer: RLUSD_ISSUER,
+            value: "1000000",
+          },
+        },
+        client,
+        newWallet,
+        "TrustSet RLUSD (customer)"
+      );
+    } catch (err) {
+      console.error("RLUSD TrustSet failed for new customer wallet:", err.message);
     }
   }
 

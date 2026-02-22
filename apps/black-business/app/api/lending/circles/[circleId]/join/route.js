@@ -1,6 +1,9 @@
 import { NextResponse } from "next/server";
 import { createClient } from "@/lib/supabase/server";
 import { requireAuth } from "@/lib/supabase/auth";
+import { getClient } from "@/lib/xrpl/client";
+import { getOrCreateCustomerWallet } from "@/lib/xrpl/wallets";
+import { issueCircleCredential } from "@/lib/xrpl/lending";
 
 export async function POST(request, { params }) {
   try {
@@ -44,6 +47,29 @@ export async function POST(request, { params }) {
       .insert({ circle_id: circleId, member_user_id: user.id });
 
     if (insertError) throw insertError;
+
+    // --- XRPL: issue CIRCLE_MEMBER credential (graceful degradation) ---
+    try {
+      const client = await getClient();
+      const { address: memberAddress, wallet: memberWallet } =
+        await getOrCreateCustomerWallet(supabase, user.id);
+
+      const credentialHash = await issueCircleCredential(client, memberAddress, memberWallet);
+
+      // Persist XRPL data on the member row
+      if (memberAddress || credentialHash) {
+        await supabase
+          .from("circle_members")
+          .update({
+            xrpl_address: memberAddress,
+            ...(credentialHash && { credential_hash: credentialHash }),
+          })
+          .eq("circle_id", circleId)
+          .eq("member_user_id", user.id);
+      }
+    } catch (xrplErr) {
+      console.error("XRPL circle credential failed (non-fatal):", xrplErr.message);
+    }
 
     const newMemberCount = memberCount + 1;
     let circleStatus = circle.status;

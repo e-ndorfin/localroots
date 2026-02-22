@@ -927,11 +927,165 @@ h3 {
   color: var(--text);
 }
 
-.circle-modal-actions {
+.circle-modal-actions,
+.repay-modal-actions {
   display: flex;
   gap: 0.5rem;
   justify-content: flex-end;
   margin-top: 0.5rem;
+}
+
+/* ── Tranche progress ── */
+.tranche-loan-group {
+  margin-bottom: 1rem;
+}
+
+.tranche-loan-group:last-child {
+  margin-bottom: 0;
+}
+
+.tranche-steps {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}
+
+.tranche-step {
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  padding: 0.75rem 1rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+  transition: opacity 0.2s ease;
+}
+
+.tranche-step.dimmed {
+  opacity: 0.45;
+  pointer-events: none;
+}
+
+.tranche-step.released {
+  border-color: #059669;
+  background: rgba(5, 150, 105, 0.04);
+}
+
+.tranche-header {
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+}
+
+.tranche-index {
+  width: 28px;
+  height: 28px;
+  border-radius: 50%;
+  background: var(--accent);
+  color: #fff;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 0.8rem;
+  font-weight: 600;
+  flex-shrink: 0;
+}
+
+.tranche-step.released .tranche-index {
+  background: #059669;
+}
+
+.tranche-step.dimmed .tranche-index {
+  background: var(--muted);
+}
+
+.tranche-info {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  gap: 0.1rem;
+}
+
+.tranche-label {
+  font-size: 0.85rem;
+  font-weight: 600;
+}
+
+.tranche-amount {
+  font-size: 0.78rem;
+  color: var(--muted);
+}
+
+.tranche-badge {
+  font-size: 0.7rem;
+  font-weight: 600;
+  padding: 0.2rem 0.55rem;
+  border-radius: 20px;
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+  white-space: nowrap;
+}
+
+.tranche-badge--pending {
+  background: rgba(148, 163, 184, 0.15);
+  color: #64748b;
+}
+
+.tranche-badge--locked {
+  background: rgba(234, 179, 8, 0.12);
+  color: #a16207;
+}
+
+.tranche-badge--proof_submitted {
+  background: rgba(59, 130, 246, 0.12);
+  color: #2563eb;
+}
+
+.tranche-badge--released {
+  background: rgba(5, 150, 105, 0.12);
+  color: #059669;
+}
+
+.tranche-badge--claimed {
+  background: rgba(5, 150, 105, 0.2);
+  color: #047857;
+}
+
+.tranche-proof-form {
+  display: flex;
+  flex-direction: column;
+  gap: 0.4rem;
+}
+
+.tranche-proof-form textarea {
+  resize: vertical;
+  min-height: 60px;
+}
+
+.tranche-proof-actions {
+  display: flex;
+  gap: 0.4rem;
+  justify-content: flex-end;
+}
+
+.tranche-proofs {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}
+
+.tranche-proof-item {
+  background: rgba(0, 0, 0, 0.02);
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  padding: 0.5rem 0.65rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.3rem;
+}
+
+.btn-sm {
+  padding: 0.35rem 0.75rem;
+  font-size: 0.8rem;
 }
 
 .login-page {

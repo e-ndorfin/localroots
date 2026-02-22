@@ -2,6 +2,8 @@ import { NextResponse } from "next/server";
 import { createClient } from "@/lib/supabase/server";
 import { requireAuth } from "@/lib/supabase/auth";
 import { LOAN_TIERS } from "@/lib/constants";
+import { getClient } from "@/lib/xrpl/client";
+import { returnRLUSDToVault } from "@/lib/xrpl/lending";
 
 export async function POST(request) {
   try {
@@ -50,6 +52,14 @@ export async function POST(request) {
       .eq("id", loanId);
 
     if (updateError) throw updateError;
+
+    // --- XRPL: return RLUSD to vault (graceful degradation) ---
+    try {
+      const client = await getClient();
+      await returnRLUSDToVault(client, amountCents);
+    } catch (xrplErr) {
+      console.error("XRPL repayment failed (non-fatal):", xrplErr.message);
+    }
 
     // If fully repaid, handle tier upgrade
     if (fullyRepaid) {

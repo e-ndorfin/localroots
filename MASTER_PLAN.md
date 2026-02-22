@@ -297,6 +297,17 @@ All money flows use RLUSD (not raw XRP) for USD-pegged stability. Reference patt
 
 Every platform account and business account needs an RLUSD trustline established on registration.
 
+> **CRITICAL: `DefaultRipple` + `NoRipple` on RLUSD Issuer (learned the hard way)**
+>
+> XRPL token payments between two non-issuer accounts must "ripple" through the issuer. If the issuer doesn't have `DefaultRipple` enabled, every trustline is created with `NoRipple` on the issuer's side, which blocks the payment path and causes `tecPATH_DRY` on every RLUSD transfer between platform accounts.
+>
+> **Required setup order** (already handled by `scripts/setup-trustlines.js`):
+> 1. Enable `DefaultRipple` on the RLUSD issuer: `AccountSet` with `SetFlag: asfDefaultRipple`
+> 2. Platform accounts create trustlines to issuer (`TrustSet`)
+> 3. Issuer clears `NoRipple` on its side of each trustline: issuer submits `TrustSet` to each counterparty with `Flags: tfClearNoRipple`
+>
+> If trustlines were created *before* `DefaultRipple` was enabled, step 3 is mandatory — the old `NoRipple` flag is baked into existing trustlines and won't auto-clear.
+
 ### B2. Card Payment → RLUSD Pipeline (`api/payments/`)
 
 ```
@@ -649,18 +660,25 @@ The central pooling and routing mechanism. Community contributions flow in, vett
 4. ~~Build `LenderDashboard.js`~~ (metrics inlined in `/vault` page)
 5. ~~Verify: lender deposits → vault total increases → lender can withdraw (balance updated in dashboard)~~ ✅
 
-### Phase 7: Lending Circles + Microloans (Borrower Flow)
-1. Build `api/lending/apply/route.js` — check tier from SQLite `borrower_tiers`, check vault capital via `ContractCall` to `get_vault_total()`, insert into SQLite `loans` + `tranches`, calculate interest in JS
-2. Build `api/lending/disburse/route.js` — mark tranche `locked` in SQLite `tranches`; RLUSD stays in vault (no `EscrowCreate` — XLS-85 not active on testnet, see escrow note above)
-3. Build `api/lending/submit-proof/route.js` — insert into SQLite `proofs`, update `tranches` status to `proof_submitted`
-4. Build `api/lending/approve-proof/route.js` — insert into SQLite `proof_approvals`; if threshold met in JS, send direct RLUSD `Payment` from vault to borrower (replaces `EscrowFinish`), update SQLite `tranches` to `released`
-5. Build `api/lending/repay/route.js` — Stripe card payment → platform converts to RLUSD → Payment to vault on XRPL; update SQLite `loans`, `lender_interest`; upgrade `borrower_tiers` in SQLite; call `ContractCall` `deposit()`
-6. Build credential issuance for circle membership — pattern from `credentials.js` lines 174-249 (on-chain, XRPL)
-7. Build `useLendingCircle()` hook
-8. Build `/lending` page with `CircleList.js`
-9. Build `/lending/[circleId]` with `CircleDetail.js`, `LoanRequestForm.js`, `TrancheProgress.js`, `RepaymentForm.js`, `ProofUpload.js`, `ProofReview.js`
-10. Build `TierIndicator.js` — graduated access visualization
-11. Verify: create circle → join → request loan → submit proof → circle approves → tranche released → repay with interest → lenders earn yield → tier upgrades
+### Phase 7: Lending Circles + Microloans (Borrower Flow) ✅
+1. ✅ `api/lending/apply/route.js` — check tier from Supabase `borrower_tiers`, check vault capital, insert `loans` + `tranches`, calculate interest
+2. ✅ `api/lending/disburse/route.js` — mark tranche `locked`; sets loan to `active`
+3. ✅ `api/lending/submit-proof/route.js` — insert proof, update tranche to `proof_submitted`
+4. ✅ `api/lending/approve-proof/route.js` — insert approval; dynamic threshold (all non-borrower members); if met, RLUSD Payment from vault → borrower on XRPL, tranche `released`, tx hash stored
+5. ✅ `api/lending/repay/route.js` — Stripe PaymentIntent via repay-intent route → on success records repayment + RLUSD return to vault on XRPL; tier upgrades on full repayment
+6. ✅ `api/lending/claim/route.js` — borrower claims released tranche, status → `claimed`
+7. ✅ `api/lending/proofs/[trancheId]/route.js` — fetch proofs with approval counts for tranche review
+8. ✅ Credential issuance on circle join — `CredentialCreate` + `CredentialAccept` (CIRCLE_MEMBER) via `lib/xrpl/lending.js`
+9. ✅ RLUSD TrustSet added to custodial wallet creation (`lib/xrpl/wallets.js`)
+10. ✅ `lib/xrpl/lending.js` — `disburseRLUSD()`, `returnRLUSDToVault()`, `issueCircleCredential()` with graceful degradation
+11. ✅ `scripts/mint-rlusd.js` — mint test RLUSD to platform accounts on Devnet
+12. ✅ `/lending` page — circle list + create circle modal (name + max members)
+13. ✅ `/lending/[circleId]` — `CircleDetail` (with Join button), `LoanRequestForm`, `TrancheProgress` (full tranche lifecycle UI with sequential gating), `RepaymentForm` (Stripe modal), `TierIndicator`
+14. ✅ Circle creation adds creator as first member; join API wires XRPL credential + wallet
+15. ✅ Tranches API allows circle member access (not just borrower)
+16. ✅ Repayment form only visible to borrower, uses Stripe Elements modal
+17. ✅ Schema: `xrpl_tx_hash` on tranches for on-chain audit trail
+18. ✅ Verified: create circle → join → request loan → unlock tranche → submit proof → circle approves → tranche released → claim → repay via Stripe → XRPL mirrors all flows
 
 ### Phase 8: Business Dashboard + Ads
 1. Build `/business/dashboard` with `RevenueDashboard.js` — RLUSD revenue stats
