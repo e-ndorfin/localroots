@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from "react";
 import Topbar from "@/components/layout/Header";
+import { createClient } from "@/lib/supabase/client";
 
 const TRANCHE_ICONS = {
   released: (
@@ -28,39 +29,64 @@ export default function BusinessFundingStatusPage() {
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
-    const pseudonym = window.localStorage.getItem("bb-pseudonym") || "demo-user";
+    const supabase = createClient();
+    supabase.auth.getUser().then(({ data: { user } }) => {
+      if (!user) { setLoading(false); return; }
 
-    // Fetch circles to find loans for this borrower
-    fetch("/api/lending/circles")
-      .then((res) => res.ok ? res.json() : null)
-      .then(async (data) => {
-        if (!data || !data.circles) return;
-        // Check each circle for loans
-        for (const circle of data.circles) {
-          const cRes = await fetch(`/api/lending/circles/${circle.id}`);
-          if (!cRes.ok) continue;
-          const cData = await cRes.json();
-          const myLoan = (cData.loans || []).find((l) => l.borrower_pseudonym === pseudonym);
-          if (myLoan) {
-            setLoan(myLoan);
-            break;
+      fetch("/api/lending/circles")
+        .then((res) => (res.ok ? res.json() : null))
+        .then(async (data) => {
+          if (!data || !data.circles) return;
+          for (const circle of data.circles) {
+            const cRes = await fetch(`/api/lending/circles/${circle.id}`);
+            if (!cRes.ok) continue;
+            const cData = await cRes.json();
+            const myLoan = (cData.loans || []).find((l) => l.borrower_user_id === user.id);
+            if (myLoan) {
+              setLoan(myLoan);
+              fetch(`/api/lending/tranches/${myLoan.id}`)
+                .then((r) => r.ok ? r.json() : null)
+                .then((t) => { if (t?.tranches) setTranches(t.tranches); })
+                .catch(() => {});
+              break;
+            }
           }
-        }
-      })
-      .catch(() => {})
-      .finally(() => setLoading(false));
+        })
+        .catch(() => {})
+        .finally(() => setLoading(false));
+    });
   }, []);
 
-  // Hardcoded fallback for demo
-  const fallbackTranches = [
-    { label: "Phase 1: Initial Deposit", description: "Contractor down payment. ($2,500)", status: "released" },
-    { label: "Phase 2: Materials", description: "Purchased lumber and paint. ($2,000)", status: "released" },
-    { label: "Phase 3: Final Labor", description: "Pending completion verification. ($5,500)", status: "locked" },
-  ];
+  if (loading) {
+    return (
+      <>
+        <div className="bg-orb orb-a"></div>
+        <div className="bg-orb orb-b"></div>
+        <Topbar />
+        <main className="content"><p className="muted">Loading...</p></main>
+      </>
+    );
+  }
 
-  const displayTranches = tranches.length ? tranches : fallbackTranches;
-  const displayLoan = loan || { principal_cents: 1000000, repaid_cents: 0, status: "active" };
-  const disbursed = loan ? (loan.principal_cents - (loan.repaid_cents || 0)) / 100 : 4500;
+  if (!loan) {
+    return (
+      <>
+        <div className="bg-orb orb-a"></div>
+        <div className="bg-orb orb-b"></div>
+        <Topbar />
+        <main className="content">
+          <section className="page-head">
+            <h1>Funding Dispersement Details</h1>
+          </section>
+          <div className="panel reveal">
+            <p className="muted">No active loan found. Submit a funding request to get started.</p>
+          </div>
+        </main>
+      </>
+    );
+  }
+
+  const disbursed = (loan.principal_cents - (loan.repaid_cents || 0)) / 100;
 
   return (
     <>
@@ -81,10 +107,10 @@ export default function BusinessFundingStatusPage() {
               <div className="flex justify-between items-start mb-2">
                 <div>
                   <div className="inline-flex items-center rounded-md px-2.5 py-0.5 text-xs font-semibold mb-2 text-teal-700 border border-teal-200 bg-teal-50">
-                    {loan ? loan.status : "Active Loan"}
+                    {loan.status}
                   </div>
-                  <h2 className="text-2xl">Storefront Renovation</h2>
-                  <p className="text-base mt-1 muted">Requested: ${((displayLoan.principal_cents || 0) / 100).toLocaleString()}</p>
+                  <h2 className="text-2xl">Microloan</h2>
+                  <p className="text-base mt-1 muted">Requested: ${(loan.principal_cents / 100).toLocaleString()}</p>
                 </div>
                 <div className="text-right">
                   <p className="text-sm text-slate-500 font-medium">Current Balance</p>
@@ -94,32 +120,35 @@ export default function BusinessFundingStatusPage() {
             </div>
 
             <div className="p-6 pt-0">
-              <div className="space-y-6 mt-4">
-                <div className="relative">
-                  <div className="absolute left-[15px] top-8 bottom-8 w-[2px] bg-slate-200"></div>
-
-                  {displayTranches.map((tranche, idx) => {
-                    const isUnlocked = tranche.status === "released";
-                    return (
-                      <div key={idx} className={`flex gap-6 relative z-10 ${idx < displayTranches.length - 1 ? "mb-8" : ""}`}>
-                        <div className={`w-8 h-8 rounded-full flex items-center justify-center shrink-0 ${isUnlocked ? "bg-teal-700 text-white shadow-md shadow-teal-700/20" : "bg-white border-2 border-slate-300 text-slate-500"}`}>
-                          {isUnlocked ? TRANCHE_ICONS.released : TRANCHE_ICONS.locked}
-                        </div>
-                        <div className={`p-4 rounded-2xl flex-1 border ${isUnlocked ? "bg-slate-50 border-slate-200" : "bg-white border-slate-200 shadow-sm opacity-60"}`}>
-                          <div className="flex justify-between items-center mb-1">
-                            <h4 className="font-bold">{tranche.label || `Tranche ${idx + 1}`}</h4>
-                            <span className={isUnlocked ? "text-teal-700 font-bold" : "text-slate-500 font-medium text-sm"}>{statusLabel(tranche.status)}</span>
+              {tranches.length === 0 ? (
+                <p className="muted text-sm mt-4">No tranches yet.</p>
+              ) : (
+                <div className="space-y-6 mt-4">
+                  <div className="relative">
+                    <div className="absolute left-[15px] top-8 bottom-8 w-[2px] bg-slate-200"></div>
+                    {tranches.map((tranche, idx) => {
+                      const isUnlocked = tranche.status === "released";
+                      return (
+                        <div key={idx} className={`flex gap-6 relative z-10 ${idx < tranches.length - 1 ? "mb-8" : ""}`}>
+                          <div className={`w-8 h-8 rounded-full flex items-center justify-center shrink-0 ${isUnlocked ? "bg-teal-700 text-white shadow-md shadow-teal-700/20" : "bg-white border-2 border-slate-300 text-slate-500"}`}>
+                            {isUnlocked ? TRANCHE_ICONS.released : TRANCHE_ICONS.locked}
                           </div>
-                          <p className="text-sm text-slate-500">{tranche.description || `$${((tranche.amount_cents || 0) / 100).toLocaleString()}`}</p>
-                          {!isUnlocked && tranche.status !== "proof_submitted" && (
-                            <button className="btn btn-outline mt-3 w-full rounded-lg text-xs">Upload Proof to Unlock</button>
-                          )}
+                          <div className={`p-4 rounded-2xl flex-1 border ${isUnlocked ? "bg-slate-50 border-slate-200" : "bg-white border-slate-200 shadow-sm opacity-60"}`}>
+                            <div className="flex justify-between items-center mb-1">
+                              <h4 className="font-bold">{`Tranche ${idx + 1}`}</h4>
+                              <span className={isUnlocked ? "text-teal-700 font-bold" : "text-slate-500 font-medium text-sm"}>{statusLabel(tranche.status)}</span>
+                            </div>
+                            <p className="text-sm text-slate-500">${((tranche.amount_cents || 0) / 100).toLocaleString()}</p>
+                            {!isUnlocked && tranche.status !== "proof_submitted" && (
+                              <button className="btn btn-outline mt-3 w-full rounded-lg text-xs">Upload Proof to Unlock</button>
+                            )}
+                          </div>
                         </div>
-                      </div>
-                    );
-                  })}
+                      );
+                    })}
+                  </div>
                 </div>
-              </div>
+              )}
             </div>
           </section>
 

@@ -36,7 +36,7 @@ export function useWalletManager() {
 
         const manager = new WalletManager({
           adapters,
-          network: "devnet",
+          network: process.env.NEXT_PUBLIC_DEFAULT_NETWORK || "devnet",
           autoConnect: true,
           logger: { level: "info" },
         });
@@ -65,7 +65,7 @@ export function useWalletManager() {
           updateConnectionState(manager);
         }
 
-        console.log("XRPL Connect initialized (Devnet)", manager);
+        console.log(`XRPL Connect initialized (${process.env.NEXT_PUBLIC_DEFAULT_NETWORK || "devnet"})`, manager);
       } catch (error) {
         console.error("Failed to initialize wallet manager:", error);
         showStatus("Failed to initialize wallet connection", "error");

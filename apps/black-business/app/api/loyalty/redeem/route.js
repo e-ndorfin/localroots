@@ -1,10 +1,12 @@
 import { NextResponse } from "next/server";
 import { createClient } from "@/lib/supabase/server";
 import { requireAuth } from "@/lib/supabase/auth";
-import { POINTS_REDEMPTION_RATE } from "@/lib/constants";
+import { POINTS_REDEMPTION_RATE, RLUSD_CURRENCY_HEX, RLUSD_ISSUER } from "@/lib/constants";
 import { getClient } from "@/lib/xrpl/client";
-import { getOrCreateCustomerWallet } from "@/lib/xrpl/wallets";
+import { getOrCreateCustomerWallet, getOrCreateBusinessWallet } from "@/lib/xrpl/wallets";
 import { redeemMPT } from "@/lib/xrpl/loyalty";
+import { submitTx } from "@/lib/xrpl/helpers";
+import * as xrpl from "xrpl";
 
 /**
  * POST /api/loyalty/redeem
@@ -83,6 +85,33 @@ export async function POST(request) {
       await redeemMPT(client, wallet, points);
     } catch (xrplErr) {
       console.error("XRPL redeem failed (non-fatal):", xrplErr.message);
+    }
+
+    // On-chain: send RLUSD from platform master to business wallet (non-fatal)
+    try {
+      if (process.env.PLATFORM_MASTER_SEED && RLUSD_ISSUER && discountCents > 0) {
+        const client = await getClient();
+        const { address: bizAddr } = await getOrCreateBusinessWallet(supabase, businessId);
+        const platformWallet = xrpl.Wallet.fromSeed(process.env.PLATFORM_MASTER_SEED);
+        const value = (discountCents / 100).toFixed(2);
+        await submitTx(
+          {
+            TransactionType: "Payment",
+            Account: platformWallet.address,
+            Destination: bizAddr,
+            Amount: {
+              currency: RLUSD_CURRENCY_HEX,
+              issuer: RLUSD_ISSUER,
+              value,
+            },
+          },
+          client,
+          platformWallet,
+          `Redeem RLUSD($${value} -> business ${bizAddr})`
+        );
+      }
+    } catch (xrplErr) {
+      console.error("XRPL redeem RLUSD transfer failed (non-fatal):", xrplErr.message);
     }
 
     const remainingBalance = balance - points;

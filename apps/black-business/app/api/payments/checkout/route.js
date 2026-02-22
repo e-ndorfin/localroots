@@ -3,7 +3,7 @@ import { requireAuth } from "@/lib/supabase/auth";
 import { createClient } from "@/lib/supabase/server";
 import { POINTS_PER_DOLLAR } from "@/lib/constants";
 import { getClient } from "@/lib/xrpl/client";
-import { getOrCreateCustomerWallet } from "@/lib/xrpl/wallets";
+import { getOrCreateCustomerWallet, getOrCreateBusinessWallet, sendRLUSDToBusiness } from "@/lib/xrpl/wallets";
 import { mintMPT } from "@/lib/xrpl/loyalty";
 
 export async function POST(request) {
@@ -59,6 +59,15 @@ export async function POST(request) {
         } catch (xrplErr) {
           console.error("XRPL mint in dev checkout failed (non-fatal):", xrplErr.message);
         }
+      }
+
+      // On-chain: send RLUSD to business wallet with 97/3 split (non-fatal)
+      try {
+        const xrplClient = await getClient();
+        const { address: bizAddr } = await getOrCreateBusinessWallet(supabase, businessId);
+        await sendRLUSDToBusiness(xrplClient, bizAddr, amountCents);
+      } catch (xrplErr) {
+        console.error("XRPL RLUSD transfer in dev checkout failed (non-fatal):", xrplErr.message);
       }
 
       return NextResponse.json({

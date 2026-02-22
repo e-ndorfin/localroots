@@ -23,12 +23,16 @@ const NAV_LINKS = {
   ],
 };
 
-export default function Topbar({ balanceContent }) {
-  const [role, setRole] = useState(() => {
-    if (typeof window !== "undefined") return sessionStorage.getItem("userRole") || null;
-    return null;
-  });
+export default function Topbar() {
+  const [role, setRole] = useState(null);
+
+  // Hydrate role from sessionStorage after mount to avoid SSR mismatch
+  useEffect(() => {
+    const cached = sessionStorage.getItem("userRole");
+    if (cached) setRole(cached);
+  }, []);
   const [points, setPoints] = useState(null);
+  const [bizBalance, setBizBalance] = useState(null);
   const pathname = usePathname();
 
   useEffect(() => {
@@ -53,7 +57,7 @@ export default function Topbar({ balanceContent }) {
     });
   }, []);
 
-  // Fetch loyalty balance only for customers (on route change + "points-updated" event)
+  // Fetch loyalty balance for customers (on route change + "points-updated" event)
   const [fetchKey, setFetchKey] = useState(0);
 
   useEffect(() => {
@@ -74,6 +78,33 @@ export default function Topbar({ balanceContent }) {
     return () => { cancelled = true; };
   }, [role, pathname, fetchKey]);
 
+  // Fetch business balance (on route change + "balance-updated" event)
+  const [bizFetchKey, setBizFetchKey] = useState(0);
+
+  useEffect(() => {
+    const handler = () => setBizFetchKey((k) => k + 1);
+    window.addEventListener("balance-updated", handler);
+    return () => window.removeEventListener("balance-updated", handler);
+  }, []);
+
+  useEffect(() => {
+    if (role !== "business") return;
+    let cancelled = false;
+    fetch("/api/business/stats")
+      .then((r) => {
+        if (!r.ok) {
+          console.error("Topbar: /api/business/stats returned", r.status);
+          return null;
+        }
+        return r.json();
+      })
+      .then((data) => {
+        if (!cancelled && data?.balanceCents != null) setBizBalance(data.balanceCents);
+      })
+      .catch((err) => console.error("Topbar: stats fetch error", err));
+    return () => { cancelled = true; };
+  }, [role, pathname, bizFetchKey]);
+
   const roleLinks = NAV_LINKS[role] || NAV_LINKS.customer;
 
   function navClass(href) {
@@ -86,6 +117,20 @@ export default function Topbar({ balanceContent }) {
     ? <div className="balance-pill"><strong>{points.toLocaleString()} pts</strong></div>
     : null;
 
+  const bizPills = role === "business" && bizBalance != null ? (
+    <>
+      <div className="balance-pill">
+        <strong>${(bizBalance / 100).toLocaleString(undefined, { minimumFractionDigits: 2 })}</strong>
+      </div>
+      <button
+        className="cashout-pill"
+        onClick={() => window.dispatchEvent(new Event("open-cashout-modal"))}
+      >
+        Cash Out
+      </button>
+    </>
+  ) : null;
+
   return (
     <header className="topbar">
       <Link className="app-name" href="/directory">LocalRoots</Link>
@@ -97,7 +142,7 @@ export default function Topbar({ balanceContent }) {
       </nav>
       <div className="topbar-right">
         <div className="site-balances">
-          {balanceContent || pointsPill}
+          {bizPills || pointsPill}
         </div>
         <UserAvatarLink />
       </div>

@@ -11,29 +11,6 @@ const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
  */
 export async function generateStorefrontImage({ businessId, name, category, location }) {
   try {
-    // Quick sanity check with a cheap model — skip gibberish businesses
-    const check = await openai.chat.completions.create({
-      model: "gpt-5-mini",
-      max_tokens: 3,
-      messages: [
-        {
-          role: "system",
-          content:
-            "You decide if a business listing is real or gibberish. Reply ONLY with YES or NO.",
-        },
-        {
-          role: "user",
-          content: `Business name: "${name}", category: "${category}", location: "${location || "none"}". Does this sound like a legitimate business?`,
-        },
-      ],
-    });
-
-    const verdict = (check.choices[0]?.message?.content || "").trim().toUpperCase();
-    if (verdict !== "YES") {
-      console.log(`Skipping image for business ${businessId} ("${name}") — failed legitimacy check`);
-      return null;
-    }
-
     const prompt = [
       `A realistic street-level photograph of a small business storefront called "${name}".`,
       `The business is a ${category} establishment`,

@@ -1,7 +1,8 @@
 "use client";
 
-import Link from "next/link";
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
+import { useRouter } from "next/navigation";
+import { createClient } from "@/lib/supabase/client";
 
 function CustomerIcon() {
   return (
@@ -34,18 +35,65 @@ function DefaultPersonIcon() {
 
 export default function UserAvatarLink({ role: roleProp }) {
   const [storedRole, setStoredRole] = useState("");
+  const [displayName, setDisplayName] = useState("");
+  const [open, setOpen] = useState(false);
+  const wrapperRef = useRef(null);
+  const router = useRouter();
 
   useEffect(() => {
-    const saved = window.localStorage.getItem("bb-role");
-    setStoredRole(saved || "");
+    const supabase = createClient();
+    supabase.auth.getUser().then(({ data: { user } }) => {
+      if (user) {
+        const role = user.user_metadata?.role || "";
+        setStoredRole(role);
+        setDisplayName(user.user_metadata?.display_name || user.email?.split("@")[0] || "");
+      }
+    });
   }, []);
+
+  // Close dropdown when clicking outside
+  useEffect(() => {
+    function handleClickOutside(e) {
+      if (wrapperRef.current && !wrapperRef.current.contains(e.target)) {
+        setOpen(false);
+      }
+    }
+    if (open) {
+      document.addEventListener("mousedown", handleClickOutside);
+      return () => document.removeEventListener("mousedown", handleClickOutside);
+    }
+  }, [open]);
+
+  async function handleLogout() {
+    const supabase = createClient();
+    await supabase.auth.signOut();
+    setOpen(false);
+    router.push("/login");
+    router.refresh();
+  }
 
   const role = roleProp ?? storedRole;
   const neutral = role !== "customer" && role !== "business";
 
   return (
-    <Link className={`user-avatar${neutral ? " user-avatar-neutral" : ""}`} href="/login" aria-label="Go to login">
-      {role === "business" ? <BusinessIcon /> : role === "customer" ? <CustomerIcon /> : <DefaultPersonIcon />}
-    </Link>
+    <div className="avatar-dropdown-wrapper" ref={wrapperRef}>
+      {displayName && <span className="avatar-display-name">{displayName}</span>}
+      <button
+        className={`user-avatar${neutral ? " user-avatar-neutral" : ""}`}
+        onClick={() => setOpen((prev) => !prev)}
+        aria-label="Profile menu"
+        aria-expanded={open}
+        aria-haspopup="true"
+      >
+        {role === "business" ? <BusinessIcon /> : role === "customer" ? <CustomerIcon /> : <DefaultPersonIcon />}
+      </button>
+      {open && (
+        <div className="avatar-dropdown">
+          <button className="avatar-dropdown-item avatar-dropdown-logout" onClick={handleLogout}>
+            Log out
+          </button>
+        </div>
+      )}
+    </div>
   );
 }

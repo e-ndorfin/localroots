@@ -8,11 +8,16 @@ export default function BusinessFundingPage() {
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState("");
   const [vaultAvailable, setVaultAvailable] = useState(null);
+  const [circleId, setCircleId] = useState(null);
 
   useEffect(() => {
     fetch("/api/vault/status")
       .then((res) => res.ok ? res.json() : null)
       .then((data) => { if (data) setVaultAvailable(data.availableCapitalCents); })
+      .catch(() => {});
+    fetch("/api/lending/circles")
+      .then((res) => res.ok ? res.json() : null)
+      .then((data) => { if (data?.circles?.length) setCircleId(data.circles[0].id); })
       .catch(() => {});
   }, []);
 
@@ -23,10 +28,15 @@ export default function BusinessFundingPage() {
 
     const form = e.target;
     const amount = Number(form.querySelector('input[type="number"]')?.value || 0);
-    const pseudonym = window.localStorage.getItem("bb-pseudonym") || "demo-user";
 
     if (amount < 100) {
       setError("Minimum loan amount is $100.");
+      setSubmitting(false);
+      return;
+    }
+
+    if (!circleId) {
+      setError("No lending circle available. Please try again later.");
       setSubmitting(false);
       return;
     }
@@ -36,8 +46,7 @@ export default function BusinessFundingPage() {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          borrowerPseudonym: pseudonym,
-          circleId: 1,
+          circleId,
           principalCents: Math.round(amount * 100),
         }),
       });

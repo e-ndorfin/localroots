@@ -5,6 +5,7 @@ import { getClient } from "@/lib/xrpl/client";
 import { textToHex, submitTx } from "@/lib/xrpl/helpers";
 import { PLATFORM_MASTER_ADDRESS } from "@/lib/constants";
 import { generateStorefrontImage } from "@/lib/openai/generateStorefrontImage";
+import { getOrCreateBusinessWallet } from "@/lib/xrpl/wallets";
 import * as xrpl from "xrpl";
 
 const CREDENTIAL_TYPE = textToHex("REGISTERED_BUSINESS");
@@ -36,13 +37,15 @@ export async function POST(request) {
     }
 
     // Check if owner already registered a business
-    const { data: existing } = await supabase
+    const { data: existingList, error: existingError } = await supabase
       .from("businesses")
       .select("id")
       .eq("owner_user_id", user.id)
-      .maybeSingle();
+      .limit(1);
 
-    if (existing) {
+    if (existingError) throw existingError;
+
+    if (existingList && existingList.length > 0) {
       return NextResponse.json(
         { error: "This owner already has a registered business" },
         { status: 409 }
@@ -82,11 +85,10 @@ export async function POST(request) {
           CredentialType: CREDENTIAL_TYPE,
           URI: textToHex(
             JSON.stringify({
-              businessId: business.id,
-              name,
-              category,
-              ownerUserId: user.id,
-              registeredAt: new Date().toISOString(),
+              bid: business.id,
+              n: name.slice(0, 40),
+              c: category.slice(0, 20),
+              t: Date.now(),
             })
           ),
         };
@@ -103,6 +105,15 @@ export async function POST(request) {
     } catch (xrplError) {
       // Log but don't fail — business is still registered in Supabase
       console.error("XRPL credential issuance failed:", xrplError.message);
+    }
+
+    // Create custodial XRPL wallet for business (non-fatal)
+    let xrplAddress = null;
+    try {
+      const { address } = await getOrCreateBusinessWallet(supabase, business.id);
+      xrplAddress = address;
+    } catch (walletError) {
+      console.error("Business wallet creation failed:", walletError.message);
     }
 
     // Generate storefront image (non-fatal)
@@ -122,6 +133,7 @@ export async function POST(request) {
       ...business,
       credentialHash,
       imageUrl,
+      xrplAddress,
     });
   } catch (err) {
     const status = err.status || 500;

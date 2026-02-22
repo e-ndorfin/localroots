@@ -52,53 +52,115 @@ You don't need to touch `packages/` (smart contracts) or `apps/web-nuxt/` (Vue v
 
 ---
 
-## Black Business Support App setup (`apps/black-business/`)
+## Black Business Support App (`apps/black-business/`)
 
-The main app lives in `apps/black-business/`. It needs XRPL Devnet accounts initialized before it can run.
+The main app lives in `apps/black-business/`. It uses **Supabase** for authentication (email/password) and database (Postgres), and **XRPL Devnet** for on-chain credentials and tokens.
 
-### 1. Install dependencies
+### Architecture
+
+- **Auth**: Supabase Auth (email + password). Middleware redirects unauthenticated users to `/login` for protected routes.
+- **Database**: Supabase Postgres. All data (businesses, loans, circles, vault deposits, loyalty points, etc.) lives in Supabase — no local SQLite.
+- **API routes**: 18 Next.js API routes under `app/api/`. Protected routes use `requireAuth()` to verify the session and get the user ID.
+- **XRPL**: On-chain credentials for registered businesses, loyalty MPT issuance, RLUSD trustlines. Configured via platform wallet env vars.
+
+### Setup
+
+#### 1. Install dependencies
 
 ```bash
 pnpm install
 ```
 
-### 2. Create `.env.local`
+#### 2. Create a Supabase project
+
+Go to [supabase.com](https://supabase.com), create a new project, and grab:
+- **Project URL** (e.g. `https://xxxx.supabase.co`)
+- **Anon/public key** (from Settings > API)
+
+#### 3. Configure environment
 
 ```bash
 cp apps/black-business/.env.local.example apps/black-business/.env.local
 ```
 
-### 3. Initialize platform wallets on Devnet
+Add to `apps/black-business/.env.local`:
+
+```
+NEXT_PUBLIC_SUPABASE_URL=https://xxxx.supabase.co
+NEXT_PUBLIC_SUPABASE_ANON_KEY=eyJ...
+```
+
+#### 4. Run the database schema
+
+Copy the contents of `supabase/schema.sql` and execute it in the **Supabase SQL Editor** (SQL Editor > New query > paste > Run). This creates all tables, indexes, and RPC functions.
+
+**Tip:** For development, go to **Authentication > Providers > Email** and disable "Confirm email" to skip email verification.
+
+#### 5. Initialize XRPL platform wallets (optional)
+
+Only needed if you want on-chain features (business credentials, loyalty tokens):
 
 ```bash
 node apps/black-business/scripts/init-platform.js
 ```
 
-This generates 4 funded Devnet wallets (RLUSD issuer, platform master, vault, rewards pool). Copy the output into `apps/black-business/.env.local`.
-
-### 4. Set up RLUSD trustlines
+This generates 4 funded Devnet wallets (RLUSD issuer, platform master, vault, rewards pool). Copy the output into `.env.local`.
 
 ```bash
 node apps/black-business/scripts/setup-trustlines.js
-```
-
-Establishes RLUSD trustlines on all platform accounts. Reads seeds from `.env.local`.
-
-### 5. Create the BBS loyalty token (MPT)
-
-```bash
 node apps/black-business/scripts/create-loyalty-mpt.js
 ```
 
-Creates the BBS loyalty MPT issuance on Devnet. Copy the printed `NEXT_PUBLIC_LOYALTY_MPT_ID` into `.env.local`.
+Copy the printed `NEXT_PUBLIC_LOYALTY_MPT_ID` into `.env.local`.
 
-### 6. Run the app
+#### 6. Run the app
 
 ```bash
 pnpm --filter black-business dev
 ```
 
-**Note:** Devnet wallets expire after ~90 days. If addresses stop working, re-run steps 3-5 and update `.env.local`.
+Open [http://localhost:3001](http://localhost:3001).
+
+### Database schema
+
+All tables live in Supabase Postgres. Schema is defined in `supabase/schema.sql`.
+
+| Table | Purpose |
+|-|-|
+| `profiles` | User role (customer/business/lender), linked to `auth.users` |
+| `businesses` | Registered businesses with category, location, balance |
+| `circles` | Lending circles (Grameen mutual guarantee model) |
+| `circle_members` | Circle membership |
+| `loans` | Microloans with graduated tiers |
+| `tranches` | Milestone-gated loan tranches |
+| `proofs` | Milestone proofs submitted by borrowers |
+| `proof_approvals` | Circle member approvals of proofs |
+| `borrower_tiers` | Graduated borrower tiers (Micro/Small/Medium) |
+| `points_ledger` | Customer loyalty points (earn/redeem) |
+| `lender_interest` | Lender interest tracking |
+| `vault_deposits` | Vault deposit/withdrawal event log |
+
+Two Postgres RPC functions (`get_vault_total`, `get_lender_balance`) handle vault balance calculations.
+
+### Key files
+
+```
+apps/black-business/
+  lib/supabase/
+    server.js          # Server-side Supabase client (cookie-based)
+    client.js          # Browser-side Supabase client
+    auth.js            # requireAuth() helper for protected API routes
+    db.js              # Vault helper functions
+  middleware.js        # Session refresh + route protection
+  app/api/             # 18 API routes (all use Supabase)
+  app/login/           # Supabase Auth sign-in
+  app/create-*/        # Supabase Auth sign-up (customer & business)
+  app/forgot-password/ # Supabase Auth password reset
+supabase/
+  schema.sql           # Full Postgres schema (run in SQL Editor)
+```
+
+**Note:** Devnet wallets expire after ~90 days. If XRPL addresses stop working, re-run the init scripts and update `.env.local`.
 
 ---
 

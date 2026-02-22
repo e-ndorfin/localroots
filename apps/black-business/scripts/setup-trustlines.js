@@ -72,8 +72,51 @@ async function verifyTrustline(client, address, label) {
   }
 }
 
+async function enableDefaultRipple(client, issuerWallet) {
+  console.log("Enabling DefaultRipple on RLUSD issuer...");
+  const resp = await client.submitAndWait(
+    {
+      TransactionType: "AccountSet",
+      Account: issuerWallet.address,
+      SetFlag: xrpl.AccountSetAsfFlags.asfDefaultRipple,
+    },
+    { autofill: true, wallet: issuerWallet }
+  );
+  const result = resp.result?.meta?.TransactionResult || "Unknown";
+  if (result !== "tesSUCCESS") {
+    throw new Error(`AccountSet DefaultRipple failed: ${result}`);
+  }
+  console.log(`  DefaultRipple enabled -> ${result}\n`);
+}
+
+async function issuerClearNoRipple(client, issuerWallet, counterpartyAddress, label) {
+  const resp = await client.submitAndWait(
+    {
+      TransactionType: "TrustSet",
+      Account: issuerWallet.address,
+      LimitAmount: {
+        currency: RLUSD_CURRENCY_HEX,
+        issuer: counterpartyAddress,
+        value: "0",
+      },
+      Flags: xrpl.TrustSetFlags.tfClearNoRipple,
+    },
+    { autofill: true, wallet: issuerWallet }
+  );
+  const result = resp.result?.meta?.TransactionResult || "Unknown";
+  if (result !== "tesSUCCESS") {
+    throw new Error(`Issuer ClearNoRipple for ${label} failed: ${result}`);
+  }
+  console.log(`  Issuer cleared NoRipple toward ${label} -> ${result}`);
+}
+
 async function main() {
   // Validate env vars
+  if (!process.env.RLUSD_ISSUER_SEED) {
+    console.error("Missing env var: RLUSD_ISSUER_SEED");
+    console.error("Run 'node scripts/init-platform.js' first and copy seeds to .env.local");
+    process.exit(1);
+  }
   for (const acct of ACCOUNTS) {
     if (!process.env[acct.seedEnv]) {
       console.error(`Missing env var: ${acct.seedEnv}`);
@@ -88,6 +131,11 @@ async function main() {
     await client.connect();
     console.log("Connected to XRPL Devnet\n");
 
+    // Step 1: Enable DefaultRipple on issuer so new trustlines allow rippling
+    const issuerWallet = xrpl.Wallet.fromSeed(process.env.RLUSD_ISSUER_SEED);
+    await enableDefaultRipple(client, issuerWallet);
+
+    // Step 2: Set up trustlines from each platform account to the issuer
     console.log("Setting up RLUSD trustlines...\n");
 
     const wallets = [];
@@ -97,13 +145,21 @@ async function main() {
       wallets.push({ wallet, label: acct.label });
     }
 
+    // Step 3: Issuer clears NoRipple on its side of each trustline
+    // (needed if trustlines were created before DefaultRipple was enabled)
+    console.log("\nClearing NoRipple on issuer side of trustlines...\n");
+
+    for (const { wallet, label } of wallets) {
+      await issuerClearNoRipple(client, issuerWallet, wallet.address, label);
+    }
+
     console.log("\nVerifying trustlines...\n");
 
     for (const { wallet, label } of wallets) {
       await verifyTrustline(client, wallet.address, label);
     }
 
-    console.log("\nAll RLUSD trustlines established.");
+    console.log("\nAll RLUSD trustlines established (rippling enabled).");
   } catch (error) {
     console.error("Error:", error.message);
     process.exit(1);

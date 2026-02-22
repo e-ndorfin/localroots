@@ -14,14 +14,14 @@ export function useBusinessProfile() {
 
   const isRegistered = !!business;
 
-  const register = useCallback(async ({ name, category, location, description, ownerPseudonym }) => {
+  const register = useCallback(async ({ name, category, location, description }) => {
     setIsLoading(true);
     setError(null);
     try {
       const res = await fetch("/api/business/register", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ name, category, location, description, ownerPseudonym }),
+        body: JSON.stringify({ name, category, location, description }),
       });
       const data = await res.json();
       if (!res.ok) {

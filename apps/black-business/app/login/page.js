@@ -32,6 +32,28 @@ export default function LoginPage() {
       return;
     }
 
+    const { data: { user } } = await supabase.auth.getUser();
+    const { data: profile } = await supabase
+      .from("profiles")
+      .select("role")
+      .eq("id", user.id)
+      .single();
+
+    const actualRole = profile?.role;
+    const isCustomer = role === "customer" && actualRole === "customer";
+    const isBusiness = role === "business" && (actualRole === "business" || actualRole === "lender");
+
+    if (!isCustomer && !isBusiness) {
+      await supabase.auth.signOut();
+      setError(
+        role === "customer"
+          ? "This email is not registered as a customer account."
+          : "This email is not registered as a business account."
+      );
+      setLoading(false);
+      return;
+    }
+
     router.push("/directory");
     router.refresh();
   }

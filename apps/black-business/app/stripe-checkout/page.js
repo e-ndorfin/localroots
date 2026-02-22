@@ -163,20 +163,18 @@ export default function StripeCheckoutPage() {
   const handlePaymentSuccess = useCallback(
     async (paymentIntent) => {
       try {
-        // Award loyalty points for cash items
-        const totalEarnedPoints = Math.floor(cashTotal * POINTS_PER_DOLLAR);
-        let totalEarned = 0;
-
-        if (totalEarnedPoints > 0) {
-          const res = await fetch("/api/loyalty/mint", {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ points: totalEarnedPoints }),
-          });
-          if (res.ok) {
-            totalEarned = totalEarnedPoints;
-          }
-        }
+        // Call confirm endpoint — credits business, awards points, mints MPT, mirrors RLUSD
+        const firstBusinessId = cashItems[0]?.businessId || items[0]?.businessId || null;
+        const confirmRes = await fetch("/api/payments/confirm", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            paymentIntentId: paymentIntent.id,
+            businessId: firstBusinessId,
+            amountCents: Math.round(cashTotal * 100),
+          }),
+        });
+        const confirmData = confirmRes.ok ? await confirmRes.json() : {};
 
         // Process points redemption items
         if (pointsTotal > 0) {
@@ -199,7 +197,7 @@ export default function StripeCheckoutPage() {
         // Clear cart
         window.localStorage.setItem(CART_KEY, "[]");
         window.dispatchEvent(new Event("points-updated"));
-        setEarnedPoints(totalEarned);
+        setEarnedPoints(confirmData.earnedPoints || 0);
         setOrderComplete(true);
       } catch (err) {
         console.error("Post-payment processing failed:", err);
@@ -207,7 +205,7 @@ export default function StripeCheckoutPage() {
         setOrderComplete(true);
       }
     },
-    [cashTotal, pointsItems, pointsTotal]
+    [cashItems, cashTotal, items, pointsItems, pointsTotal]
   );
 
   const hasPk = !!process.env.NEXT_PUBLIC_STRIPE_PUBLISHABLE_KEY;

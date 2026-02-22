@@ -3,7 +3,7 @@ import { createClient } from "@/lib/supabase/server";
 import { requireAuth } from "@/lib/supabase/auth";
 import { MIN_PROOF_APPROVALS } from "@/lib/constants";
 import { getClient } from "@/lib/xrpl/client";
-import { getOrCreateCustomerWallet } from "@/lib/xrpl/wallets";
+import { getOrCreateCustomerWallet, getOrCreateBusinessWallet } from "@/lib/xrpl/wallets";
 import { disburseRLUSD } from "@/lib/xrpl/lending";
 
 export async function POST(request) {
@@ -81,7 +81,7 @@ export async function POST(request) {
 
       if (updateError) throw updateError;
 
-      // --- XRPL: disburse RLUSD to borrower (graceful degradation) ---
+      // --- XRPL: disburse RLUSD to business wallet (or customer wallet fallback) ---
       try {
         const { data: tranche } = await supabase
           .from("tranches")
@@ -92,24 +92,47 @@ export async function POST(request) {
         if (tranche) {
           const { data: loan } = await supabase
             .from("loans")
-            .select("borrower_user_id")
+            .select("borrower_user_id, business_id")
             .eq("id", tranche.loan_id)
             .single();
 
           if (loan) {
             const client = await getClient();
-            const { address: borrowerAddress } = await getOrCreateCustomerWallet(
-              supabase,
-              loan.borrower_user_id
-            );
+            let disbursementAddress;
 
-            const txHash = await disburseRLUSD(client, borrowerAddress, tranche.amount_cents);
+            if (loan.business_id) {
+              // Route to business wallet
+              const { address } = await getOrCreateBusinessWallet(supabase, loan.business_id);
+              disbursementAddress = address;
+            } else {
+              // Fallback: route to customer wallet
+              const { address } = await getOrCreateCustomerWallet(supabase, loan.borrower_user_id);
+              disbursementAddress = address;
+            }
+
+            const txHash = await disburseRLUSD(client, disbursementAddress, tranche.amount_cents);
 
             if (txHash) {
               await supabase
                 .from("tranches")
                 .update({ xrpl_tx_hash: txHash })
                 .eq("id", proof.tranche_id);
+            }
+
+            // Credit business balance so it's visible in the dashboard
+            if (loan.business_id) {
+              const { data: biz } = await supabase
+                .from("businesses")
+                .select("balance_cents")
+                .eq("id", loan.business_id)
+                .single();
+
+              if (biz) {
+                await supabase
+                  .from("businesses")
+                  .update({ balance_cents: (biz.balance_cents || 0) + tranche.amount_cents })
+                  .eq("id", loan.business_id);
+              }
             }
           }
         }

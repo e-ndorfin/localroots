@@ -18,10 +18,13 @@ CREATE TABLE businesses (
   category TEXT NOT NULL,
   location TEXT,
   description TEXT,
+  lat DOUBLE PRECISION,
+  lng DOUBLE PRECISION,
   owner_user_id UUID NOT NULL REFERENCES auth.users(id),
   credential_hash TEXT,
   balance_cents BIGINT NOT NULL DEFAULT 0,
   image_url TEXT,
+  products JSONB NOT NULL DEFAULT '[]'::jsonb,
   is_boosted BOOLEAN NOT NULL DEFAULT false,
   created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
   updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
@@ -142,6 +145,15 @@ CREATE TABLE customer_wallets (
   created_at TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 
+-- Business custodial XRPL wallets
+CREATE TABLE business_wallets (
+  id BIGINT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+  business_id BIGINT NOT NULL UNIQUE REFERENCES businesses(id),
+  xrpl_address TEXT NOT NULL,
+  seed_encrypted TEXT NOT NULL,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
 -- Vault deposits / withdrawals
 CREATE TABLE vault_deposits (
   id BIGINT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
@@ -173,6 +185,7 @@ CREATE INDEX idx_lender_interest_loan ON lender_interest(loan_id);
 CREATE INDEX idx_vault_deposits_lender ON vault_deposits(lender_user_id);
 CREATE INDEX idx_vault_deposits_type ON vault_deposits(type);
 CREATE INDEX idx_customer_wallets_user ON customer_wallets(user_id);
+CREATE INDEX idx_business_wallets_business ON business_wallets(business_id);
 
 -- ============================================================
 -- RPC functions for vault helpers
@@ -187,3 +200,21 @@ CREATE OR REPLACE FUNCTION get_lender_balance(p_user_id UUID) RETURNS BIGINT AS 
   SELECT COALESCE(SUM(CASE WHEN type='deposit' THEN amount_cents ELSE -amount_cents END), 0)
   FROM vault_deposits WHERE lender_user_id = p_user_id;
 $$ LANGUAGE sql STABLE;
+
+DO $$
+DECLARE t text;
+BEGIN
+FOR t IN SELECT tablename FROM pg_tables WHERE schemaname = 'public'
+LOOP
+  EXECUTE format('ALTER TABLE public.%I ENABLE ROW LEVEL SECURITY', t);
+  EXECUTE format('CREATE POLICY "Allow all for authenticated" ON public.%I FOR ALL TO authenticated
+USING (true) WITH CHECK (true)', t);
+  EXECUTE format('CREATE POLICY "Allow all for anon" ON public.%I FOR ALL TO anon USING (true) WITH
+CHECK (true)', t);
+END LOOP;
+END $$;
+
+GRANT ALL ON ALL TABLES IN SCHEMA public TO anon, authenticated, service_role;
+GRANT ALL ON ALL SEQUENCES IN SCHEMA public TO anon, authenticated, service_role;
+GRANT ALL ON ALL FUNCTIONS IN SCHEMA public TO anon, authenticated, service_role;
+NOTIFY pgrst, 'reload schema';

@@ -19,6 +19,8 @@ export async function PATCH(request) {
       .from("businesses")
       .select("id")
       .eq("owner_user_id", user.id)
+      .order("created_at", { ascending: true })
+      .limit(1)
       .maybeSingle();
 
     if (!existing) {

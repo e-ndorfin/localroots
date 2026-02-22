@@ -843,8 +843,8 @@ These are ready to use as-is or as reference patterns:
 - [x] `app/api/vault/deposit/route.js`, `withdraw/route.js`, `status/route.js` — all implemented (SQLite only)
 - [x] `app/vault/page.js` — wired to /api/vault/status and /api/vault/deposit
 - [x] `components/vault/VaultOverview.js`, `VaultDepositForm.js`, `VaultWithdrawForm.js`, `LenderDashboard.js` — UI present
-- [ ] Wire XRPL into deposit: RLUSD Payment from platform → vault account
-- [ ] Wire XRPL into withdraw: RLUSD Payment from vault → platform account
+- [x] Wire XRPL into deposit: RLUSD Payment from platform → vault account
+- [x] Wire XRPL into withdraw: RLUSD Payment from vault → platform account
 - [ ] `VaultDepositForm` / `VaultWithdrawForm` — wire to real API calls (currently UI stubs)
 
 **Verify**: Deposit via Stripe test card → vault total increases → withdraw → balance updated in dashboard (principal + earned interest).
@@ -863,9 +863,9 @@ These are ready to use as-is or as reference patterns:
 - [x] `app/api/lending/circles/[circleId]/join/route.js` — POST join circle
 - [x] `app/lending/page.js` + `components/lending/CircleList.js`
 - [x] `app/lending/[circleId]/page.js` + `CircleDetail.js`, `LoanRequestForm.js`, `TrancheProgress.js`, `RepaymentForm.js`, `TierIndicator.js`
-- [ ] Wire XRPL into approve-proof: RLUSD Payment from vault → borrower on tranche release
-- [ ] Wire XRPL into repay: RLUSD Payment back to vault on repayment
-- [ ] Circle credential issuance (CredentialCreate + CredentialAccept) — XRPL
+- [x] Wire XRPL into approve-proof: RLUSD Payment from vault → borrower on tranche release
+- [x] Wire XRPL into repay: RLUSD Payment back to vault on repayment
+- [x] Circle credential issuance (CredentialCreate + CredentialAccept) — XRPL
 
 **Verify**: Full lending cycle — create circle → join → request loan → submit proof for tranche 1 → circle approves → RLUSD released → repeat → repay with interest → lenders earn yield → tier upgrade.
 

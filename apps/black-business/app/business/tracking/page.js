@@ -2,88 +2,205 @@
 
 import { useEffect, useState } from "react";
 import Topbar from "@/components/layout/Header";
-
-const recentOrders = [
-  { initials: "JD", customer: "John Doe", items: "1x Artisan Sourdough Loaf, 2x Coffee", amount: 24.5, status: "Ready for pickup" },
-  { initials: "MB", customer: "Mia Brown", items: "2x Veggie Wrap, 1x Matcha Latte", amount: 31.75, status: "Preparing order" },
-  { initials: "AL", customer: "Ari Lewis", items: "1x Granola Bowl, 1x Fresh Juice", amount: 18.0, status: "Completed" },
-];
+import BoostVisibilityForm from "@/components/business/BoostVisibilityForm";
+import { createClient } from "@/lib/supabase/client";
 
 export default function BusinessTrackingPage() {
-  const [balance, setBalance] = useState(null);
-  const [businessName, setBusinessName] = useState("");
+  const [stats, setStats] = useState(null);
+  const [loading, setLoading] = useState(true);
+
+  // Cashout modal state
+  const [showCashoutModal, setShowCashoutModal] = useState(false);
+  const [cashoutStep, setCashoutStep] = useState("bank");
+  const [bankInfo, setBankInfo] = useState({ institution: "", transit: "", account: "" });
+  const [cashoutAmount, setCashoutAmount] = useState("");
+  const [cashoutLoading, setCashoutLoading] = useState(false);
 
   useEffect(() => {
-    const name = window.localStorage.getItem("bb-business-name") || "";
-    setBusinessName(name);
-    const pseudonym = window.localStorage.getItem("bb-pseudonym") || "demo-user";
-
-    fetch("/api/business/directory")
-      .then((res) => res.ok ? res.json() : null)
-      .then((data) => {
-        if (data && data.businesses) {
-          const mine = data.businesses.find((b) => b.ownerPseudonym === pseudonym);
-          if (mine) setBalance(mine.balanceCents);
-        }
-      })
-      .catch(() => {});
+    const supabase = createClient();
+    supabase.auth.getUser().then(({ data: { user } }) => {
+      if (!user) {
+        setLoading(false);
+        return;
+      }
+      fetch("/api/business/stats")
+        .then((res) => (res.ok ? res.json() : null))
+        .then((data) => {
+          if (data && !data.error) setStats(data);
+        })
+        .catch(() => {})
+        .finally(() => setLoading(false));
+    });
   }, []);
 
-  const revenue = balance !== null ? (balance / 100).toLocaleString(undefined, { minimumFractionDigits: 2 }) : "12,480";
+  // Listen for cashout modal open event from Topbar
+  useEffect(() => {
+    const handler = () => {
+      setCashoutStep("bank");
+      setCashoutAmount("");
+      setBankInfo({ institution: "", transit: "", account: "" });
+      setShowCashoutModal(true);
+    };
+    window.addEventListener("open-cashout-modal", handler);
+    return () => window.removeEventListener("open-cashout-modal", handler);
+  }, []);
+
+  const fmt = (cents) =>
+    cents != null
+      ? (cents / 100).toLocaleString(undefined, { minimumFractionDigits: 2 })
+      : "—";
+
+  const revenue = stats ? fmt(stats.balanceCents) : "—";
+
+  async function confirmCashout() {
+    const cents = Math.round(parseFloat(cashoutAmount) * 100);
+    if (!cents || cents <= 0) return;
+    setCashoutLoading(true);
+    try {
+      const res = await fetch("/api/business/cashout", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ amountCents: cents }),
+      });
+      const data = await res.json();
+      if (!res.ok) {
+        alert(data.error || "Cashout failed");
+        setCashoutLoading(false);
+        return;
+      }
+      setStats((prev) => (prev ? { ...prev, balanceCents: data.newBalanceCents } : prev));
+      window.dispatchEvent(new Event("balance-updated"));
+      setCashoutStep("success");
+    } catch {
+      alert("Network error");
+    } finally {
+      setCashoutLoading(false);
+    }
+  }
+
+  const maxCashout = stats ? (stats.balanceCents / 100).toFixed(2) : "0.00";
 
   return (
     <>
       <div className="bg-orb orb-a"></div>
       <div className="bg-orb orb-b"></div>
 
-      <Topbar balanceContent={<div className="balance-pill"><strong>${revenue}</strong></div>} />
+      <Topbar />
 
       <main className="content">
         <section className="card-grid">
           <article className="panel reveal">
-            <p className="muted">Revenue (30 days)</p>
-            <h2>${revenue}</h2>
-            <p className="muted">{balance !== null ? "From customer purchases" : "+14% vs last month"}</p>
+            <p className="muted">Revenue (All Time)</p>
+            <h2>{stats ? `$${revenue}` : "—"}</h2>
+            <p className="muted">From customer purchases</p>
           </article>
           <article className="panel reveal">
-            <p className="muted">Orders (30 days)</p>
-            <h2>286</h2>
-            <p className="muted">Average order: $43.64</p>
+            <p className="muted">Total Orders</p>
+            <h2>{stats ? stats.totalOrders.toLocaleString() : "—"}</h2>
+            <p className="muted">Loyalty point earn events</p>
           </article>
           <article className="panel reveal">
-            <p className="muted">Repeat Customers</p>
-            <h2>41%</h2>
-            <p className="muted">Target: 45%</p>
+            <p className="muted">Unique Customers</p>
+            <h2>{stats ? stats.uniqueCustomers.toLocaleString() : "—"}</h2>
+            <p className="muted">Distinct customers served</p>
+          </article>
+          <article className="panel reveal">
+            <p className="muted">Points Redeemed</p>
+            <h2>{stats ? stats.pointsRedeemed.toLocaleString() : "—"}</h2>
+            <p className="muted">Customer loyalty redemptions</p>
           </article>
         </section>
 
-        <section className="reveal mt-6 max-w-3xl">
-          <h2 className="mb-2 text-lg">Recent Customer Purchases</h2>
-          <div className="bg-white rounded-2xl soft-shadow border border-border/50 overflow-hidden">
-            <div className="divide-y divide-border">
-              {recentOrders.map((order) => (
-                <div key={`${order.customer}-${order.amount}`} className="p-3 flex items-center justify-between hover:bg-muted/20 transition-colors">
-                  <div className="flex items-center gap-3">
-                    <div className="w-10 h-10 bg-secondary rounded-full flex items-center justify-center text-secondary-foreground text-sm font-bold">
-                      {order.initials}
-                    </div>
-                    <div>
-                      <p className="font-bold text-sm">{order.customer}</p>
-                      <p className="text-xs text-muted-foreground">{order.items}</p>
-                    </div>
-                  </div>
-                  <div className="text-right flex flex-col items-end gap-1">
-                    <p className="font-bold text-sm">${order.amount.toFixed(2)}</p>
-                    <div className="whitespace-nowrap inline-flex items-center rounded-md px-2 py-0.5 font-semibold transition-colors border bg-green-50 text-green-700 border-green-200 text-[11px]">
-                      {order.status}
-                    </div>
-                  </div>
-                </div>
-              ))}
-            </div>
-          </div>
+        <section className="reveal mt-6 max-w-md">
+          <BoostVisibilityForm isBoosted={stats?.isBoosted} />
         </section>
       </main>
+
+      {/* Cashout modal */}
+      <div className={`circle-modal${showCashoutModal ? " open" : ""}`} onClick={() => !cashoutLoading && setShowCashoutModal(false)}>
+        <div className="circle-modal-card" onClick={(e) => e.stopPropagation()}>
+          <button className="circle-modal-close" onClick={() => !cashoutLoading && setShowCashoutModal(false)}>×</button>
+
+          {cashoutStep === "bank" && (
+            <>
+              <h2>Cash Out</h2>
+              <p className="muted" style={{ marginBottom: "1rem" }}>
+                Enter your bank details and the amount to withdraw. This information is equivalent to a void cheque.
+              </p>
+              <label>
+                Amount ($)
+                <input
+                  type="number"
+                  min="0.01"
+                  max={maxCashout}
+                  step="0.01"
+                  placeholder="0.00"
+                  value={cashoutAmount}
+                  onChange={(e) => setCashoutAmount(e.target.value)}
+                />
+              </label>
+              <label>
+                Institution Number
+                <input
+                  type="text"
+                  maxLength={3}
+                  placeholder="e.g. 001"
+                  value={bankInfo.institution}
+                  onChange={(e) => setBankInfo((b) => ({ ...b, institution: e.target.value }))}
+                />
+              </label>
+              <label>
+                Transit Number
+                <input
+                  type="text"
+                  maxLength={5}
+                  placeholder="e.g. 12345"
+                  value={bankInfo.transit}
+                  onChange={(e) => setBankInfo((b) => ({ ...b, transit: e.target.value }))}
+                />
+              </label>
+              <label>
+                Account Number
+                <input
+                  type="text"
+                  maxLength={12}
+                  placeholder="e.g. 1234567"
+                  value={bankInfo.account}
+                  onChange={(e) => setBankInfo((b) => ({ ...b, account: e.target.value }))}
+                />
+              </label>
+              <div className="circle-modal-actions">
+                <button
+                  className="btn btn-solid"
+                  disabled={cashoutLoading || !cashoutAmount || !bankInfo.institution || !bankInfo.transit || !bankInfo.account}
+                  onClick={confirmCashout}
+                >
+                  {cashoutLoading ? "Processing..." : "Confirm Withdrawal"}
+                </button>
+              </div>
+            </>
+          )}
+
+          {cashoutStep === "success" && (
+            <div style={{ textAlign: "center" }}>
+              <div style={{
+                width: 64, height: 64, borderRadius: "50%", background: "#ecfdf5",
+                display: "flex", alignItems: "center", justifyContent: "center",
+                margin: "0 auto 16px", fontSize: 32,
+              }}>
+                ✓
+              </div>
+              <h2>Withdrawal Successful</h2>
+              <p className="muted" style={{ marginTop: 8 }}>
+                <strong>${parseFloat(cashoutAmount).toFixed(2)} CAD</strong> will be transferred to your bank account ending in ****{bankInfo.account.slice(-4)}. Please allow 2–3 business days for processing.
+              </p>
+              <button className="btn btn-solid" style={{ marginTop: 20 }} onClick={() => setShowCashoutModal(false)}>
+                Done
+              </button>
+            </div>
+          )}
+        </div>
+      </div>
     </>
   );
 }

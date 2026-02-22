@@ -142,5 +142,8 @@ Cargo.lock
 .cursorindexingignore
 .abstra/
 
+# Reference scripts (standalone, not part of workspace)
+xrpl-js-python-simple-scripts/
+
 # OS
 Thumbs.db
