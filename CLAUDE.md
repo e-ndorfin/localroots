@@ -2,6 +2,10 @@
 
 This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
 
+## IMPORTANT: Master Plan
+
+**Always read `MASTER_PLAN.md` at the root of this repository before starting any implementation work.** It contains the comprehensive implementation plan for the Black Business Support App, including architecture, user flows, backend API routes, frontend components, XRPL transaction patterns, smart contract design, and phased build order. All implementation decisions should align with that plan.
+
 ## Project Overview
 
 Scaffold-XRP monorepo for building dApps on the XRP Ledger with smart contract support. Inspired by Scaffold-ETH-2. Uses Turborepo with pnpm workspaces.
