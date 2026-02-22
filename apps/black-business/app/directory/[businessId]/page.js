@@ -1,20 +1,41 @@
 "use client";
+
 import Link from "next/link";
 import { useEffect, useState } from "react";
 import { useParams } from "next/navigation";
 import Topbar from "@/components/layout/Header";
-import { businesses, storefrontProfiles } from "@/lib/mockData";
+import { createClient } from "@/lib/supabase/client";
 
 const CART_KEY = "bb-cart-items";
 
 export default function BusinessDetailPage() {
   const params = useParams();
   const businessId = typeof params?.businessId === "string" ? params.businessId : "";
-  const business = businesses.find((item) => item.id === businessId);
-  const profile = storefrontProfiles[businessId];
+  const [business, setBusiness] = useState(null);
+  const [loading, setLoading] = useState(true);
   const [cartCount, setCartCount] = useState(0);
+  const [role, setRole] = useState(null);
+
+  const isBusiness = role === "business";
 
   useEffect(() => {
+    const supabase = createClient();
+    supabase
+      .from("businesses")
+      .select("id, name, category, location, description, is_boosted, products")
+      .eq("id", businessId)
+      .single()
+      .then(({ data }) => {
+        setBusiness(data || null);
+        setLoading(false);
+      });
+
+    supabase.auth.getUser().then(({ data: { user } }) => {
+      if (!user) return;
+      supabase.from("profiles").select("role").eq("id", user.id).single()
+        .then(({ data }) => setRole(data?.role || user.user_metadata?.role || "customer"));
+    });
+
     try {
       const cartRaw = window.localStorage.getItem(CART_KEY);
       const cart = cartRaw ? JSON.parse(cartRaw) : [];
@@ -22,7 +43,7 @@ export default function BusinessDetailPage() {
     } catch {
       setCartCount(0);
     }
-  }, []);
+  }, [businessId]);
 
   function add(product) {
     try {
@@ -33,6 +54,7 @@ export default function BusinessDetailPage() {
         id: Date.now() + Math.random(),
         name: product.name,
         price: Number(product.price || 0),
+        businessId: String(businessId),
         usePoints: false,
       });
       window.localStorage.setItem(CART_KEY, JSON.stringify(next));
@@ -42,11 +64,23 @@ export default function BusinessDetailPage() {
     }
   }
 
-  if (!business || !profile) {
+  if (loading) {
     return (
       <>
         <div className="bg-orb orb-a"></div>
         <div className="bg-orb orb-b"></div>
+        <Topbar />
+        <main className="content"><p className="muted">Loading...</p></main>
+      </>
+    );
+  }
+
+  if (!business) {
+    return (
+      <>
+        <div className="bg-orb orb-a"></div>
+        <div className="bg-orb orb-b"></div>
+        <Topbar />
         <main className="content">
           <section className="panel">
             <h1>Storefront not found</h1>
@@ -66,33 +100,45 @@ export default function BusinessDetailPage() {
       <Topbar />
 
       <main className="content">
-        <section className="page-head"><h1>{business.name}</h1></section>
+        <section className="page-head">
+          <h1>{business.name}</h1>
+          {business.is_boosted && <span className="biz-badge">Featured</span>}
+        </section>
         <section className="panel reveal">
-          <p className="rating">&#9733; {business.rating} ({business.reviews} reviews)</p>
-          <h2>Order Products</h2>
-          <p className="muted">{profile.intro}</p>
-          <p className="store-location"><strong>Location:</strong> {business.location}</p>
-          <img className="store-hero-image" src={business.image} alt={`${business.name} storefront`} />
+          <p className="muted">{business.description || "No description provided."}</p>
+          <p className="store-location"><strong>Location:</strong> {business.location || "—"}</p>
+          {business.category && (
+            <p className="muted"><strong>Category:</strong> {business.category}</p>
+          )}
 
+          <h2 className="mt-4">Products</h2>
           <div className="product-list">
-            {profile.products.map((product) => (
-              <div className="product-item" key={product.name}>
-                <div><h3>{product.name}</h3><p>{product.description}</p></div>
-                <div className="product-actions"><span>${product.price}</span><button className="btn btn-solid" onClick={() => add(product)}>Add</button></div>
+            {(!business.products || business.products.length === 0) ? (
+              <p className="muted text-sm">This business has not listed any products yet.</p>
+            ) : business.products.map((product) => (
+              <div className="product-item" key={product.id}>
+                <div>
+                  <h3>{product.name}</h3>
+                  <p>{product.description}</p>
+                </div>
+                <div className="product-actions">
+                  <span>${Number(product.price || 0).toFixed(2)}</span>
+                  {!isBusiness && (
+                    <button className="btn btn-solid" onClick={() => add(product)}>Add</button>
+                  )}
+                </div>
               </div>
             ))}
           </div>
 
-          <div className="checkout-row">
-            <p><strong>Cart Items:</strong> <span>{cartCount}</span></p>
-            <Link className="btn btn-outline" href="/checkout">Checkout</Link>
-          </div>
+          {!isBusiness && (
+            <div className="checkout-row mt-4">
+              <p><strong>Cart Items:</strong> <span>{cartCount}</span></p>
+              <Link className="btn btn-outline" href="/checkout">Checkout</Link>
+            </div>
+          )}
         </section>
       </main>
     </>
   );
 }
-
-
-
-

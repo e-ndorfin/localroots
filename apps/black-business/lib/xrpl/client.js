@@ -8,7 +8,14 @@
 
 const xrpl = require("xrpl");
 
-const DEVNET_WSS = "wss://s.devnet.rippletest.net:51233";
+const NETWORK_WSS = {
+  mainnet: "wss://xrplcluster.com",
+  testnet: "wss://s.altnet.rippletest.net:51233",
+  devnet: "wss://s.devnet.rippletest.net:51233",
+};
+
+const network = process.env.NEXT_PUBLIC_DEFAULT_NETWORK || "devnet";
+const WSS_URL = NETWORK_WSS[network] || NETWORK_WSS.devnet;
 
 let clientInstance = null;
 
@@ -22,7 +29,7 @@ async function getClient() {
     return clientInstance;
   }
 
-  clientInstance = new xrpl.Client(DEVNET_WSS);
+  clientInstance = new xrpl.Client(WSS_URL);
   await clientInstance.connect();
   return clientInstance;
 }
@@ -37,4 +44,4 @@ async function disconnectClient() {
   }
 }
 
-module.exports = { getClient, disconnectClient, DEVNET_WSS };
+module.exports = { getClient, disconnectClient, WSS_URL };

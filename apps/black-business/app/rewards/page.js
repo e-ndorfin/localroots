@@ -5,7 +5,6 @@ import Link from "next/link";
 import Topbar from "@/components/layout/Header";
 import PointsBalance from "@/components/rewards/PointsBalance";
 import PointsHistory from "@/components/rewards/PointsHistory";
-import { rewardHistory as mockHistory } from "@/lib/mockData";
 
 export default function RewardsPage() {
   const [points, setPoints] = useState(0);
@@ -13,28 +12,21 @@ export default function RewardsPage() {
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
-    const pseudonym = window.localStorage.getItem("bb-pseudonym") || "demo-user";
-    fetch(`/api/loyalty/balance?pseudonym=${encodeURIComponent(pseudonym)}`)
+    fetch("/api/loyalty/balance")
       .then((res) => res.ok ? res.json() : null)
       .then((data) => {
         if (data) {
           setPoints(data.balance);
-          setHistory(data.history.length ? data.history.map((h) => ({
+          setHistory((data.history || []).map((h) => ({
             id: h.id,
             type: h.type,
             points: h.points,
             description: h.description,
             date: h.created_at,
-          })) : mockHistory);
-        } else {
-          setPoints(1840);
-          setHistory(mockHistory);
+          })));
         }
       })
-      .catch(() => {
-        setPoints(1840);
-        setHistory(mockHistory);
-      })
+      .catch(() => {})
       .finally(() => setLoading(false));
   }, []);
 
