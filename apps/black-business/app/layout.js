@@ -1,14 +1,14 @@
-"use client";
-
 import "./globals.css";
-import { WalletProvider } from "../components/providers/WalletProvider";
+
+export const metadata = {
+  title: "LocalRoots - Black Business Support",
+  description: "Shop, earn, and invest in Black-owned businesses",
+};
 
 export default function RootLayout({ children }) {
   return (
     <html lang="en">
-      <body className="bg-gray-50 min-h-screen">
-        <WalletProvider>{children}</WalletProvider>
-      </body>
+      <body>{children}</body>
     </html>
   );
 }

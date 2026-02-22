@@ -1,129 +1,116 @@
 "use client";
 
-import { Header } from "../components/layout/Header";
 import Link from "next/link";
 
-export default function Home() {
+export default function HomePage() {
   return (
-    <div className="min-h-screen">
-      <Header />
+    <>
+      <div className="bg-orb orb-a" />
+      <div className="bg-orb orb-b" />
 
-      <main className="container mx-auto px-4 py-16">
-        <div className="text-center mb-16">
-          <h1 className="text-5xl font-bold mb-4 text-primary">
-            Black Business Support
+      <div className="topbar">
+        <Link href="/" className="app-name">LocalRoots</Link>
+        <div className="topbar-right">
+          <Link href="/login" className="btn btn-outline">Sign In</Link>
+          <Link href="/choose-account" className="btn btn-solid">Get Started</Link>
+        </div>
+      </div>
+
+      <div className="content" style={{ maxWidth: 900, margin: "0 auto" }}>
+        <div className="panel reveal" style={{ marginTop: "2rem", textAlign: "center", padding: "2.5rem 1.5rem" }}>
+          <p className="eyebrow">Community-Powered Commerce</p>
+          <h1 style={{ fontSize: "clamp(1.8rem, 3vw, 2.8rem)", marginBottom: "0.6rem" }}>
+            Black Business Support Platform
           </h1>
-          <p className="text-xl text-gray-600 max-w-2xl mx-auto">
-            Shop intentionally. Earn rewards. Fund community growth.
-            A platform connecting customers, Black-owned businesses,
-            and community lenders.
+          <p className="muted" style={{ maxWidth: 560, margin: "0 auto 1.5rem", fontSize: "1.05rem", lineHeight: 1.55 }}>
+            Shop, earn rewards, and invest in Black-owned businesses through local-first
+            commerce, loyalty, and lending.
           </p>
-        </div>
-
-        <div className="grid grid-cols-1 md:grid-cols-3 gap-8 max-w-5xl mx-auto">
-          {/* Customer CTA */}
-          <div className="card text-center hover:shadow-lg transition-shadow">
-            <div className="w-16 h-16 bg-loyalty/10 rounded-full flex items-center justify-center mx-auto mb-4">
-              <span className="text-3xl">&#x1F6CD;</span>
-            </div>
-            <h2 className="text-2xl font-bold mb-3 text-loyalty">Shop & Earn</h2>
-            <p className="text-gray-600 mb-6">
-              Discover Black-owned businesses near you. Pay by card, earn reward
-              points, and redeem them for discounts.
-            </p>
-            <Link
-              href="/directory"
-              className="inline-block btn-loyalty w-full text-center"
-            >
-              Browse Directory
+          <div style={{ display: "flex", flexWrap: "wrap", gap: "0.6rem", justifyContent: "center" }}>
+            <Link href="/directory" className="btn btn-solid" style={{ padding: "0.7rem 1.4rem", fontSize: "1rem" }}>
+              Shop &amp; Earn
             </Link>
-          </div>
-
-          {/* Business Owner CTA */}
-          <div className="card text-center hover:shadow-lg transition-shadow">
-            <div className="w-16 h-16 bg-accent/10 rounded-full flex items-center justify-center mx-auto mb-4">
-              <span className="text-3xl">&#x1F3EA;</span>
-            </div>
-            <h2 className="text-2xl font-bold mb-3 text-accent">List Your Business</h2>
-            <p className="text-gray-600 mb-6">
-              Register for free. Get discovered by customers. Access microloans
-              backed by community capital.
-            </p>
-            <Link
-              href="/business/register"
-              className="inline-block btn-primary w-full text-center"
-            >
-              Register Now
+            <Link href="/business/register" className="btn btn-outline" style={{ padding: "0.7rem 1.4rem", fontSize: "1rem" }}>
+              List Your Business
             </Link>
-          </div>
-
-          {/* Lender CTA */}
-          <div className="card text-center hover:shadow-lg transition-shadow">
-            <div className="w-16 h-16 bg-vault/10 rounded-full flex items-center justify-center mx-auto mb-4">
-              <span className="text-3xl">&#x1F91D;</span>
-            </div>
-            <h2 className="text-2xl font-bold mb-3 text-vault">Support the Community</h2>
-            <p className="text-gray-600 mb-6">
-              Contribute to the Shared Asset Vault. Fund microloans for
-              Black-owned businesses and earn interest.
-            </p>
-            <Link
-              href="/vault"
-              className="inline-block btn-vault w-full text-center"
-            >
-              Open Vault
+            <Link href="/vault" className="btn btn-outline" style={{ padding: "0.7rem 1.4rem", fontSize: "1rem" }}>
+              Support the Community
             </Link>
           </div>
         </div>
 
-        <div className="mt-20 max-w-3xl mx-auto">
-          <h2 className="text-2xl font-bold text-center mb-8 text-primary">How It Works</h2>
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-            <div className="bg-white rounded-lg p-6 border border-gray-200">
-              <h3 className="font-semibold text-lg mb-2">For Customers</h3>
-              <ol className="text-sm text-gray-600 space-y-2 list-decimal list-inside">
+        <div className="card-grid reveal" style={{ marginTop: "1.5rem" }}>
+          <div className="panel">
+            <div className="eyebrow" style={{ color: "var(--gold)" }}>Customer</div>
+            <h2 style={{ fontSize: "1.25rem", marginBottom: "0.4rem" }}>Shop &amp; Earn</h2>
+            <p className="muted" style={{ margin: 0, fontSize: "0.92rem" }}>
+              Discover businesses, pay with card, earn loyalty points redeemable across the network.
+            </p>
+          </div>
+          <div className="panel">
+            <div className="eyebrow" style={{ color: "var(--accent)" }}>Business Owner</div>
+            <h2 style={{ fontSize: "1.25rem", marginBottom: "0.4rem" }}>Grow &amp; Fund</h2>
+            <p className="muted" style={{ margin: 0, fontSize: "0.92rem" }}>
+              Register, track performance, and access community-backed microloans to grow.
+            </p>
+          </div>
+          <div className="panel">
+            <div className="eyebrow" style={{ color: "#7c3aed" }}>Lender</div>
+            <h2 style={{ fontSize: "1.25rem", marginBottom: "0.4rem" }}>Invest &amp; Impact</h2>
+            <p className="muted" style={{ margin: 0, fontSize: "0.92rem" }}>
+              Deposit RLUSD to the community vault, earn interest, and join lending circles.
+            </p>
+          </div>
+        </div>
+
+        <div className="panel reveal" style={{ marginTop: "1.5rem", padding: "1.5rem" }}>
+          <h2 style={{ fontSize: "1.3rem", marginBottom: "0.8rem", textAlign: "center" }}>How It Works</h2>
+          <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(220px, 1fr))", gap: "1rem" }}>
+            <div className="panel" style={{ background: "#fff", border: "1px solid var(--line)" }}>
+              <h3 style={{ fontSize: "1rem", marginBottom: "0.35rem" }}>For Customers</h3>
+              <ol style={{ margin: 0, paddingLeft: "1.1rem", color: "var(--muted)", fontSize: "0.88rem", lineHeight: 1.65 }}>
                 <li>Browse the directory of Black-owned businesses</li>
                 <li>Pay with your regular card — no crypto needed</li>
                 <li>Earn reward points on every purchase</li>
                 <li>Redeem points for discounts at any business</li>
               </ol>
             </div>
-            <div className="bg-white rounded-lg p-6 border border-gray-200">
-              <h3 className="font-semibold text-lg mb-2">For Business Owners</h3>
-              <ol className="text-sm text-gray-600 space-y-2 list-decimal list-inside">
-                <li>Register your business for free — no subscription</li>
+            <div className="panel" style={{ background: "#fff", border: "1px solid var(--line)" }}>
+              <h3 style={{ fontSize: "1rem", marginBottom: "0.35rem" }}>For Business Owners</h3>
+              <ol style={{ margin: 0, paddingLeft: "1.1rem", color: "var(--muted)", fontSize: "0.88rem", lineHeight: 1.65 }}>
+                <li>Register your business for free</li>
                 <li>Get listed in the platform directory</li>
-                <li>Receive payments directly to your dashboard</li>
+                <li>Receive payments to your dashboard</li>
                 <li>Apply for community-backed microloans</li>
               </ol>
             </div>
-            <div className="bg-white rounded-lg p-6 border border-gray-200">
-              <h3 className="font-semibold text-lg mb-2">For Community Lenders</h3>
-              <ol className="text-sm text-gray-600 space-y-2 list-decimal list-inside">
-                <li>Connect your wallet to the Shared Asset Vault</li>
-                <li>Contribute funds to a community lending pool</li>
-                <li>Capital funds microloans for vetted businesses</li>
-                <li>Earn interest as borrowers repay their loans</li>
+            <div className="panel" style={{ background: "#fff", border: "1px solid var(--line)" }}>
+              <h3 style={{ fontSize: "1rem", marginBottom: "0.35rem" }}>For Community Lenders</h3>
+              <ol style={{ margin: 0, paddingLeft: "1.1rem", color: "var(--muted)", fontSize: "0.88rem", lineHeight: 1.65 }}>
+                <li>Contribute to the Shared Asset Vault</li>
+                <li>Capital funds microloans for businesses</li>
+                <li>Earn interest as borrowers repay loans</li>
+                <li>Join lending circles for mutual guarantee</li>
               </ol>
             </div>
-            <div className="bg-white rounded-lg p-6 border border-gray-200">
-              <h3 className="font-semibold text-lg mb-2">Lending Circles</h3>
-              <ol className="text-sm text-gray-600 space-y-2 list-decimal list-inside">
+            <div className="panel" style={{ background: "#fff", border: "1px solid var(--line)" }}>
+              <h3 style={{ fontSize: "1rem", marginBottom: "0.35rem" }}>Lending Circles</h3>
+              <ol style={{ margin: 0, paddingLeft: "1.1rem", color: "var(--muted)", fontSize: "0.88rem", lineHeight: 1.65 }}>
                 <li>Borrowers join circles of 4-6 members</li>
                 <li>Loans disbursed in milestone-gated tranches</li>
-                <li>Circle members verify proof before each release</li>
-                <li>Graduated tiers unlock larger loan amounts</li>
+                <li>Circle members verify proof before release</li>
+                <li>Graduated tiers unlock larger amounts</li>
               </ol>
             </div>
           </div>
         </div>
-      </main>
 
-      <footer className="border-t border-gray-200 mt-16">
-        <div className="container mx-auto px-4 py-6 text-center text-gray-600">
-          <p>Black Business Support — Powered by XRPL</p>
+        <div style={{ borderTop: "1px solid var(--line)", marginTop: "2.5rem", paddingTop: "1rem", textAlign: "center" }}>
+          <p className="muted" style={{ fontSize: "0.85rem" }}>
+            Black Business Support — Powered by XRPL
+          </p>
         </div>
-      </footer>
-    </div>
+      </div>
+    </>
   );
 }

@@ -740,17 +740,17 @@ These are ready to use as-is or as reference patterns:
 **Goal**: Get a running Next.js app with XRPL connectivity and platform accounts on Devnet.
 
 **Build**:
-- [ ] `apps/black-business/` — New Next.js app (scaffold from `apps/web/`)
-- [ ] `apps/black-business/package.json` — Dependencies: next, react, xrpl, tailwindcss, stripe, @stripe/stripe-js, @stripe/react-stripe-js
-- [ ] Copy + adapt: `next.config.js`, `tailwind.config.js`
-- [ ] `lib/networks.js` — Devnet as default
-- [ ] `lib/constants.js` — Platform config placeholders
-- [ ] `scripts/init-platform.js` — Generate + fund platform wallets on Devnet (uses `client.fundWallet()`)
-- [ ] `app/layout.js` — Root layout with providers
-- [ ] `app/page.js` — Landing page with three CTA buttons
-- [ ] `components/layout/Header.js` — Navigation + role switcher
+- [x] `apps/black-business/` — Next.js app with Jamie's frontend design system
+- [x] `apps/black-business/package.json` — Dependencies: next, react, xrpl, tailwindcss, stripe, @stripe/stripe-js, @stripe/react-stripe-js, sql.js
+- [x] `next.config.js` (Node.js polyfills), `tailwind.config.js`, `jsconfig.json`, `postcss.config.mjs`
+- [x] `lib/networks.js` — Devnet as default
+- [x] `lib/constants.js` — Platform config (addresses, MPT ID, fee rates)
+- [x] `scripts/init-platform.js` — Generate + fund platform wallets on Devnet
+- [x] `app/layout.js` — Root layout with metadata
+- [x] `app/page.js` — Landing page with Jamie's design
+- [x] `components/layout/Header.js`, `Sidebar.js`, `AppFrame.js`, `UserAvatarLink.js`
 
-**Verify**: `pnpm --filter black-business dev` runs, landing page loads, Stripe Elements render in test mode.
+**Verify**: `pnpm --filter black-business dev` runs, landing page loads, build succeeds.
 
 ### PHASE 2: RLUSD + MPT Token Infrastructure
 **Goal**: Platform accounts have RLUSD trustlines and a loyalty MPT token exists on Devnet. After this phase, the platform can send/receive RLUSD (the stablecoin used for all money flows) and mint/transfer BBS loyalty points (the MPT token customers earn).
@@ -768,12 +768,12 @@ These are ready to use as-is or as reference patterns:
 **Goal**: Businesses can register and appear in a browsable directory.
 
 **Build**:
-- [ ] `app/api/business/register/route.js` — Issue REGISTERED_BUSINESS credential, create internal ledger entry (custodial model)
-- [ ] `app/api/business/directory/route.js` — Query registered businesses
-- [ ] `app/business/register/page.js` + `components/business/RegistrationForm.js`
-- [ ] `app/directory/page.js` + `components/directory/BusinessCard.js`, `BusinessSearch.js`
-- [ ] `app/directory/[businessId]/page.js` — Business detail page
-- [ ] `hooks/useDirectory.js`, `hooks/useBusinessProfile.js`
+- [x] `app/api/business/register/route.js` — Issue REGISTERED_BUSINESS credential (XRPL CredentialCreate), create internal ledger entry
+- [x] `app/api/business/directory/route.js` — Query registered businesses from SQLite
+- [x] `app/business/register/page.js` + `components/business/RegistrationForm.js`
+- [x] `app/directory/page.js` + `components/directory/BusinessCard.js`, `BusinessSearch.js`
+- [x] `app/directory/[businessId]/page.js` — Business detail page (uses mockData for products)
+- [x] `hooks/useDirectory.js`, `hooks/useBusinessProfile.js`
 
 **Verify**: Register a test business → it appears in the directory listing.
 
@@ -781,16 +781,19 @@ These are ready to use as-is or as reference patterns:
 **Goal**: Customers pay by card, businesses receive RLUSD, customers earn and redeem points.
 
 **Build**:
-- [ ] `lib/stripe/config.js` — Stripe publishable key (frontend Elements) + secret key (backend API). Used by customer checkout, lender deposits, and borrower repayments.
-- [ ] `app/api/payments/checkout/route.js` — Create Stripe PaymentIntent
-- [ ] `app/api/payments/webhook/route.js` — Handle payment success → RLUSD to business + MPT to customer
-- [ ] `app/api/loyalty/mint/route.js` — Mint MPT points after purchase
-- [ ] `app/api/loyalty/redeem/route.js` — MPT → RLUSD swap + payout
-- [ ] `components/directory/CheckoutButton.js` — Stripe Elements card form
-- [ ] `components/directory/PointsEarned.js` — Post-purchase confirmation
-- [ ] `app/rewards/page.js` + `components/rewards/PointsBalance.js`, `PointsHistory.js`
-- [ ] `app/rewards/redeem/page.js` + `components/rewards/RedeemForm.js`
-- [ ] `hooks/useRewards.js`
+- [x] `app/api/payments/checkout/route.js` — Create Stripe PaymentIntent (SQLite + Stripe, mock fallback)
+- [x] `app/api/payments/webhook/route.js` — Handle payment success → credits business balance + awards points (SQLite only)
+- [x] `app/api/loyalty/mint/route.js` — Award points (SQLite only)
+- [x] `app/api/loyalty/redeem/route.js` — Redeem points, credit business (SQLite only)
+- [x] `app/api/loyalty/balance/route.js` — Query customer points balance + history
+- [x] `components/checkout/CheckoutButton.js` — Checkout button (UI stub, no real Stripe Elements)
+- [x] `components/checkout/PointsEarned.js` — Post-purchase confirmation
+- [x] `app/rewards/page.js` + `components/rewards/PointsBalance.js`, `PointsHistory.js`
+- [x] `app/rewards/redeem/page.js` + `components/rewards/RedeemForm.js`
+- [ ] Wire XRPL into webhook: RLUSD Payment to business after Stripe payment
+- [ ] Wire XRPL into mint: MPT minting to customer after purchase
+- [ ] Wire XRPL into redeem: MPT→RLUSD swap on-chain
+- [ ] `CheckoutButton` — replace UI stub with real Stripe Elements
 
 **Verify**: Full customer loop — pay by card → check RLUSD arrived to business → check points balance → redeem points.
 
@@ -809,39 +812,47 @@ These are ready to use as-is or as reference patterns:
 **Goal**: Community lenders can deposit via Stripe, track vault health, see earned interest, and withdraw.
 
 **Build**:
-- [ ] `app/api/vault/deposit/route.js`, `withdraw/route.js`, `status/route.js`
-- [ ] `app/vault/page.js` + `components/vault/VaultOverview.js`, `VaultDepositForm.js`, `VaultWithdrawForm.js`
-- [ ] `components/vault/LenderDashboard.js` — shows contribution, earned interest, funded loans
-- [ ] `hooks/useVault.js`
+- [x] `app/api/vault/deposit/route.js`, `withdraw/route.js`, `status/route.js` — all implemented (SQLite only)
+- [x] `app/vault/page.js` — wired to /api/vault/status and /api/vault/deposit
+- [x] `components/vault/VaultOverview.js`, `VaultDepositForm.js`, `VaultWithdrawForm.js`, `LenderDashboard.js` — UI present
+- [ ] Wire XRPL into deposit: RLUSD Payment from platform → vault account
+- [ ] Wire XRPL into withdraw: RLUSD Payment from vault → platform account
+- [ ] `VaultDepositForm` / `VaultWithdrawForm` — wire to real API calls (currently UI stubs)
 
 **Verify**: Deposit via Stripe test card → vault total increases → withdraw → balance updated in dashboard (principal + earned interest).
 
 ### PHASE 7: Lending Circles + Microloans
-**Goal**: Borrowers join circles, request loans disbursed in proof-gated milestone tranches, repay with interest that flows back to lenders. Circle/loan/proof/tier state in SQLite; XRPL handles credentials and escrows.
+**Goal**: Borrowers join circles, request loans disbursed in proof-gated milestone tranches, repay with interest that flows back to lenders. Circle/loan/proof/tier state in SQLite; XRPL handles credentials and RLUSD payments.
 
 **Build**:
-- [ ] `app/api/lending/apply/route.js` — tier check from SQLite, vault check via `ContractCall`, insert into SQLite `loans` + `tranches`
-- [ ] `app/api/lending/disburse/route.js` — `EscrowCreate` on XRPL, store escrow ID in SQLite `tranches`
-- [ ] `app/api/lending/submit-proof/route.js` — insert into SQLite `proofs`, update `tranches` status
-- [ ] `app/api/lending/approve-proof/route.js` — insert into SQLite `proof_approvals`; on threshold met, `EscrowFinish` on XRPL, update SQLite
-- [ ] `app/api/lending/repay/route.js` — Stripe card payment → platform converts to RLUSD → Payment to vault on XRPL; update SQLite `loans`, `lender_interest`, `borrower_tiers`; call contract `deposit()`
-- [ ] Circle credential issuance (CredentialCreate + CredentialAccept + DepositPreauth) — XRPL
-- [ ] `app/lending/page.js` + `components/lending/CircleList.js`
-- [ ] `app/lending/[circleId]/page.js` + `CircleDetail.js`, `LoanRequestForm.js`, `TrancheProgress.js`, `RepaymentForm.js`, `ProofUpload.js`, `ProofReview.js`
-- [ ] `components/lending/TierIndicator.js`
-- [ ] `hooks/useLendingCircle.js`
+- [x] `app/api/lending/apply/route.js` — tier check, vault capital check, inserts loans + tranches (SQLite only)
+- [x] `app/api/lending/disburse/route.js` — marks tranche `locked` in SQLite (custodial, no EscrowCreate)
+- [x] `app/api/lending/submit-proof/route.js` — inserts proofs, updates tranche status (SQLite only)
+- [x] `app/api/lending/approve-proof/route.js` — inserts approvals, checks threshold, updates tranche to `released` (SQLite only)
+- [x] `app/api/lending/repay/route.js` — updates repaid_cents, upgrades borrower tier (SQLite only)
+- [x] `app/api/lending/circles/route.js` — GET list / POST create circles
+- [x] `app/api/lending/circles/[circleId]/route.js` — GET circle detail + members + loans
+- [x] `app/api/lending/circles/[circleId]/join/route.js` — POST join circle
+- [x] `app/lending/page.js` + `components/lending/CircleList.js`
+- [x] `app/lending/[circleId]/page.js` + `CircleDetail.js`, `LoanRequestForm.js`, `TrancheProgress.js`, `RepaymentForm.js`, `TierIndicator.js`
+- [ ] Wire XRPL into approve-proof: RLUSD Payment from vault → borrower on tranche release
+- [ ] Wire XRPL into repay: RLUSD Payment back to vault on repayment
+- [ ] Circle credential issuance (CredentialCreate + CredentialAccept) — XRPL
 
-**Verify**: Full lending cycle — create circle → join → request loan → submit proof for tranche 1 → circle approves → escrow releases funds → repeat for each tranche → repay with interest → lenders earn yield → tier upgrade.
+**Verify**: Full lending cycle — create circle → join → request loan → submit proof for tranche 1 → circle approves → RLUSD released → repeat → repay with interest → lenders earn yield → tier upgrade.
 
 ### PHASE 8: Business Dashboard + Ad Revenue
 **Goal**: Business owners see revenue stats and can optionally boost visibility.
 
 **Build**:
-- [ ] `app/business/dashboard/page.js` + `components/business/RevenueDashboard.js`
-- [ ] `components/business/BoostVisibilityForm.js`
+- [x] `app/business/tracking/page.js` — business metrics dashboard (Jamie's frontend)
+- [x] `app/business/storefront/page.js` — product CRUD + live preview (Jamie's frontend)
+- [x] `app/business/funding/page.js` + `app/business/funding/status/page.js` — loan request + timeline
+- [ ] Wire business dashboard to real SQLite revenue data (currently hardcoded metrics)
+- [ ] `components/business/BoostVisibilityForm.js` — optional ad purchase (stub exists)
 - [ ] Wire boosted businesses to sort first in `/directory`
 
-**Verify**: Business dashboard shows RLUSD revenue, boost appears in directory.
+**Verify**: Business dashboard shows real revenue from SQLite, boost appears in directory.
 
 ### PHASE 9: Polish + Production Readiness
 **Goal**: Complete, tested, responsive application.

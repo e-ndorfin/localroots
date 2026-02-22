@@ -1,6 +1,7 @@
 /** @type {import('tailwindcss').Config} */
 module.exports = {
   content: [
+    "./pages/**/*.{js,ts,jsx,tsx,mdx}",
     "./app/**/*.{js,jsx}",
     "./components/**/*.{js,jsx}",
   ],
@@ -17,6 +18,9 @@ module.exports = {
         community: "#dc2626",
       },
     },
+  },
+  corePlugins: {
+    preflight: false,
   },
   plugins: [],
 };
