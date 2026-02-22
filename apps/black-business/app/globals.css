@@ -121,6 +121,60 @@ h3 {
   color: #64748b;
 }
 
+.avatar-dropdown-wrapper {
+  position: relative;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.avatar-display-name {
+  font-size: 0.875rem;
+  font-weight: 500;
+  color: var(--fg);
+  white-space: nowrap;
+}
+
+.avatar-dropdown {
+  position: absolute;
+  top: calc(100% + 6px);
+  right: 0;
+  min-width: 140px;
+  background: #fff;
+  border: 1px solid #e2e8f0;
+  border-radius: 10px;
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.1);
+  z-index: 100;
+  padding: 4px;
+}
+
+.avatar-dropdown-item {
+  display: block;
+  width: 100%;
+  padding: 8px 14px;
+  border: none;
+  background: none;
+  font-size: 0.875rem;
+  font-family: inherit;
+  text-align: left;
+  cursor: pointer;
+  border-radius: 7px;
+  color: #334155;
+  transition: background 0.15s;
+}
+
+.avatar-dropdown-item:hover {
+  background: #f1f5f9;
+}
+
+.avatar-dropdown-logout {
+  color: #ef4444;
+}
+
+.avatar-dropdown-logout:hover {
+  background: #fef2f2;
+}
+
 .balance-pill {
   display: inline-flex;
   align-items: center;
@@ -162,7 +216,7 @@ h3 {
 
 .browse-map {
   width: 100%;
-  height: 280px;
+  height: 560px;
   border-radius: 0;
   border: 0;
   margin-top: 0;
@@ -783,6 +837,103 @@ h3 {
   font-size: 0.85rem;
 }
 
+/* ── Circle create modal ── */
+.circle-modal {
+  position: fixed;
+  inset: 0;
+  background: rgba(20, 25, 24, 0.45);
+  backdrop-filter: blur(4px);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 50;
+  padding: 1rem;
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 0.2s ease;
+}
+
+.circle-modal.open {
+  opacity: 1;
+  pointer-events: auto;
+}
+
+.circle-modal-card {
+  width: min(440px, 100%);
+  background: #fff;
+  border-radius: 16px;
+  border: 1px solid var(--line);
+  box-shadow: var(--shadow);
+  padding: 1.5rem;
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+  transform: translateY(12px);
+  transition: transform 0.2s ease;
+}
+
+.circle-modal.open .circle-modal-card {
+  transform: translateY(0);
+}
+
+.circle-modal-card h2 {
+  margin: 0;
+  font-size: 1.15rem;
+}
+
+.circle-modal-card label {
+  display: flex;
+  flex-direction: column;
+  gap: 0.3rem;
+  font-size: 0.85rem;
+  font-weight: 500;
+  color: var(--muted);
+}
+
+.circle-modal-card input,
+.circle-modal-card select {
+  width: 100%;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  padding: 0.55rem 0.7rem;
+  font-family: inherit;
+  font-size: 0.95rem;
+  color: var(--text);
+  background: #fff;
+}
+
+.circle-modal-card input:focus,
+.circle-modal-card select:focus {
+  outline: none;
+  border-color: var(--accent);
+  box-shadow: 0 0 0 3px rgba(125, 102, 67, 0.12);
+}
+
+.circle-modal-close {
+  position: absolute;
+  right: 12px;
+  top: 12px;
+  background: transparent;
+  border: none;
+  font-size: 1.4rem;
+  line-height: 1;
+  cursor: pointer;
+  color: var(--muted);
+  padding: 0.2rem;
+}
+
+.circle-modal-close:hover {
+  color: var(--text);
+}
+
+.circle-modal-actions {
+  display: flex;
+  gap: 0.5rem;
+  justify-content: flex-end;
+  margin-top: 0.5rem;
+}
+
 .login-page {
   min-height: 100vh;
 }
@@ -796,6 +947,7 @@ h3 {
 
 .login-card {
   width: min(430px, 100%);
+  min-height: 50vh;
   background: var(--panel);
   border: 1px solid rgba(255, 255, 255, 0.8);
   border-radius: 20px;
@@ -865,6 +1017,22 @@ h3 {
   color: var(--muted);
 }
 
+.link-button {
+  background: none;
+  border: none;
+  color: var(--accent);
+  font-family: inherit;
+  font-size: inherit;
+  cursor: pointer;
+  padding: 0;
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+
+.link-button:hover {
+  color: var(--accent-deep);
+}
+
 .account-type-grid {
   margin-top: 1rem;
   display: grid;
@@ -874,11 +1042,15 @@ h3 {
 .account-type-card {
   display: block;
   text-decoration: none;
+  text-align: left;
   color: var(--ink);
   background: #fff;
   border: 1px solid #e3dccf;
   border-radius: 14px;
   padding: 0.9rem;
+  font-family: inherit;
+  cursor: pointer;
+  width: 100%;
   transition: border-color 0.2s ease, transform 0.2s ease;
 }
 

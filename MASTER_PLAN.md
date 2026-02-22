@@ -6,7 +6,7 @@ Black-owned small businesses face disproportionate barriers to capital and custo
 
 **Key architectural decision**: The entire crypto/XRPL layer is invisible to **all** end users. Customers pay by card and see "reward points." Businesses see USD balances in their dashboard. Community lenders deposit and withdraw via Stripe and see USD balances and earned interest in their dashboard. No user ever touches crypto.
 
-**SQLite-only persistence (no Rust contract)**: All application state — including vault balances — lives in SQLite (`sql.js`, no server, just a local file). The Rust WASM contract has been dropped; vault deposit/withdrawal tracking uses 4 SQLite helper functions that replace the contract 1:1. XRPL handles the impressive on-chain primitives (RLUSD payments, MPT minting, escrows, credentials). SQLite handles application state that doesn't need to be on-chain. This is the pragmatic hackathon choice: the on-chain pieces are what judges care about; circle governance and vault accounting don't need to be blockchain primitives.
+**Supabase persistence + auth (no Rust contract)**: All application state — including vault balances — lives in **Supabase Postgres** (migrated from SQLite). Auth uses **Supabase Auth** (email+password) with middleware-based session management — all `*_pseudonym` columns replaced with `*_user_id UUID` foreign keys to `auth.users`. The Rust WASM contract has been dropped; vault deposit/withdrawal tracking uses Postgres RPC functions (`get_vault_total`, `get_lender_balance`) and helper functions in `lib/supabase/db.js`. XRPL handles the on-chain primitives (RLUSD payments, MPT minting, escrows, credentials). Supabase handles application state, auth, and data that doesn't need to be on-chain. Schema lives in `supabase/schema.sql`.
 
 **Business crypto abstraction (Custodial Model — Option B)**: Businesses do **not** have their own XRPL wallets. The platform holds RLUSD on behalf of businesses in a platform-managed custodial account, tracking each business's balance in an internal ledger. Businesses see dollar amounts in their dashboard and can "withdraw" (which triggers a platform → Stripe Connect payout). This means:
 - No XRPL wallet creation per business
@@ -77,7 +77,7 @@ nsbehacks/
       lib/
         xrpl/                     # XRPL transaction builders
         stripe/                   # Stripe payment integration
-        db.js                     # SQLite connection + schema (better-sqlite3)
+        db.js                     # Supabase helper functions (vault balance tracking)
         networks.js               # Copied from apps/web/lib/networks.js
         constants.js              # Contract addresses, MPT IDs, fee rates
       next.config.js              # Copied from apps/web (same polyfills)
@@ -456,18 +456,18 @@ The on-chain enforcement of missed deadlines (previously `CancelAfter`) is repla
 - Query all accounts with `"REGISTERED_BUSINESS"` credential
 - Return list with metadata (name, category, location, visibility boost status)
 
-### B7. Vault Balance Tracking (SQLite — no Rust contract)
+### B7. Vault Balance Tracking (Supabase Postgres — no Rust contract)
 
-**Vault balances tracked entirely in SQLite.** The Rust WASM contract has been dropped. The `vault_deposits` table logs every deposit/withdrawal event, and 4 helper functions in `lib/db.js` replace the contract 1:1:
+**Vault balances tracked entirely in Supabase Postgres.** The Rust WASM contract has been dropped. The `vault_deposits` table logs every deposit/withdrawal event. Two Postgres RPC functions and 4 helper functions in `lib/supabase/db.js` replace the contract 1:1:
 
-- `getVaultTotal(db)` — net vault balance (deposits minus withdrawals)
-- `getLenderBalance(db, pseudonym)` — per-lender net balance
-- `recordDeposit(db, pseudonym, amountCents)` — insert deposit row
-- `recordWithdrawal(db, pseudonym, amountCents)` — insert withdrawal row (with balance check)
+- `getVaultTotal()` — net vault balance via `supabase.rpc('get_vault_total')`
+- `getLenderBalance(userId)` — per-lender net balance via `supabase.rpc('get_lender_balance', { p_user_id })`
+- `recordDeposit(userId, amountCents)` — insert deposit row
+- `recordWithdrawal(userId, amountCents)` — insert withdrawal row (with balance check)
 
-The XRPL vault account still holds pooled RLUSD on-chain — only the balance *tracking* moved to SQLite.
+The XRPL vault account still holds pooled RLUSD on-chain — only the balance *tracking* moved to Supabase.
 
-**SQLite tables handle everything** (see `lib/db.js`).
+**Supabase Postgres tables handle everything** (see `supabase/schema.sql`).
 
 ---
 
@@ -642,12 +642,12 @@ The central pooling and routing mechanism. Community contributions flow in, vett
 6. SQLite schema — tables: `businesses`, `circles`, `circle_members`, `loans`, `tranches`, `proofs`, `proof_approvals`, `borrower_tiers`, `points_ledger`, `lender_interest`
 7. Add `blackbusiness.db` to `.gitignore`
 
-### Phase 6: SAV Vault Frontend (Lender Flow)
-1. Build `api/vault/deposit/route.js`, `api/vault/withdraw/route.js`, `api/vault/status/route.js`
-2. Build `useVault()` hook
-3. Build `/vault` page with `VaultOverview.js`, `VaultDepositForm.js`, `VaultWithdrawForm.js`
-4. Build `LenderDashboard.js` — contribution tracking, earned interest display, impact metrics
-5. Verify: lender deposits via Stripe test card → vault total increases → lender can withdraw (balance updated in dashboard)
+### Phase 6: SAV Vault Frontend (Lender Flow) ✅
+1. ~~Build `api/vault/deposit/route.js`, `api/vault/withdraw/route.js`, `api/vault/status/route.js`~~ ✅
+2. ~~Build `useVault()` hook~~ (inlined in `/vault` page)
+3. ~~Build `/vault` page with deposit + withdraw UI, metrics, progress bar~~ ✅
+4. ~~Build `LenderDashboard.js`~~ (metrics inlined in `/vault` page)
+5. ~~Verify: lender deposits → vault total increases → lender can withdraw (balance updated in dashboard)~~ ✅
 
 ### Phase 7: Lending Circles + Microloans (Borrower Flow)
 1. Build `api/lending/apply/route.js` — check tier from SQLite `borrower_tiers`, check vault capital via `ContractCall` to `get_vault_total()`, insert into SQLite `loans` + `tranches`, calculate interest in JS
@@ -778,35 +778,45 @@ These are ready to use as-is or as reference patterns:
 **Verify**: Register a test business → it appears in the directory listing.
 
 ### PHASE 4: Customer Payment + Loyalty Rewards
-**Goal**: Customers pay by card, businesses receive RLUSD, customers earn and redeem points.
+**Goal**: Customers pay by card, businesses receive RLUSD, customers earn and redeem points. MPT loyalty tokens minted/transferred on-chain as an on-chain mirror of the Supabase points ledger.
 
 **Build**:
-- [x] `app/api/payments/checkout/route.js` — Create Stripe PaymentIntent (SQLite + Stripe, mock fallback)
-- [x] `app/api/payments/webhook/route.js` — Handle payment success → credits business balance + awards points (SQLite only)
-- [x] `app/api/loyalty/mint/route.js` — Award points (SQLite only)
-- [x] `app/api/loyalty/redeem/route.js` — Redeem points, credit business (SQLite only)
+- [x] `app/api/payments/checkout/route.js` — Create Stripe PaymentIntent (Supabase + Stripe, mock fallback). Dev mode now does full post-payment inline: credits business, awards points, mints MPT on-chain, returns `earnedPoints`.
+- [x] `app/api/payments/webhook/route.js` — Handle payment success → credits business balance + awards points + mints MPT on-chain (with graceful degradation)
+- [x] `app/api/loyalty/mint/route.js` — Award points (Supabase only)
+- [x] `app/api/loyalty/redeem/route.js` — Redeem points, credit business, transfer MPT back to platform on-chain (with graceful degradation)
 - [x] `app/api/loyalty/balance/route.js` — Query customer points balance + history
 - [x] `components/checkout/CheckoutButton.js` — Checkout button (UI stub, no real Stripe Elements)
 - [x] `components/checkout/PointsEarned.js` — Post-purchase confirmation
-- [x] `app/rewards/page.js` + `components/rewards/PointsBalance.js`, `PointsHistory.js`
+- [x] `app/rewards/page.js` + `components/rewards/PointsBalance.js`, `PointsHistory.js` — fetches real data from API (removed hardcoded 1840 fallback + mock history)
 - [x] `app/rewards/redeem/page.js` + `components/rewards/RedeemForm.js`
-- [ ] Wire XRPL into webhook: RLUSD Payment to business after Stripe payment
-- [ ] Wire XRPL into mint: MPT minting to customer after purchase
-- [ ] Wire XRPL into redeem: MPT→RLUSD swap on-chain
-- [ ] `CheckoutButton` — replace UI stub with real Stripe Elements
+- [x] `lib/xrpl/wallets.js` — **NEW** — `getOrCreateCustomerWallet(supabase, userId)`: generates Devnet wallet, funds via faucet, authorizes for loyalty MPT, persists to `customer_wallets` table
+- [x] `lib/xrpl/loyalty.js` — **NEW** — `mintMPT(client, address, points)` and `redeemMPT(client, wallet, points)`: on-chain MPT Payment transactions with graceful degradation (XRPL failures logged, not thrown — Supabase is source of truth)
+- [x] `supabase/schema.sql` — Added `customer_wallets` table (`user_id`, `xrpl_address`, `seed_encrypted`, `mpt_authorized`) + index
+- [x] Wire XRPL into webhook: MPT minting to customer after Stripe payment confirmation
+- [x] Wire XRPL into checkout (dev mode): MPT minting inline when no Stripe key configured
+- [x] Wire XRPL into redeem: MPT transferred back to platform on-chain
+- [x] `app/checkout/page.js` — Fixed: `POINTS_PER_DOLLAR` corrected from 100→10, removed dead `bb-pseudonym` localStorage usage, cart items grouped by `businessId`, fetches loyalty balance on mount to validate "Use points" toggles, uses `earnedPoints` from API response, dispatches `points-updated` event for Header pill
+- [x] `app/directory/[businessId]/page.js` — Cart items now include `businessId` from URL param
+- [x] `components/layout/Header.js` — Points pill now fetches real balance from `/api/loyalty/balance`, only shows for customer role, re-fetches on route change + `points-updated` custom event. Role resolved from Supabase `profiles` table (replaced dead `bb-role` localStorage read).
+- [x] Wire XRPL into webhook: RLUSD Payment to business after Stripe payment — N/A under custodial model (business has no XRPL wallet, Supabase ledger is source of truth)
+- [x] `CheckoutButton` — fake Stripe-style card UI sufficient for hackathon demo
 
-**Verify**: Full customer loop — pay by card → check RLUSD arrived to business → check points balance → redeem points.
+**Verify**: Full customer loop — pay by card → check points in Supabase `points_ledger` → check MPT balance on-chain via Devnet explorer → check Header pill updates → redeem points → MPT balance decreases. Dev mode (no Stripe key) works end-to-end inline.
 
-### PHASE 5: Vault Balance Tracking + SQLite Setup *(SQLite-only — no Rust contract)*
-**Goal**: Vault balances tracked in SQLite alongside all other app state. No Rust WASM contract needed.
+### PHASE 5: Vault Balance Tracking + Supabase Setup *(Supabase Postgres — no Rust contract)*
+**Goal**: Vault balances tracked in Supabase Postgres alongside all other app state. No Rust WASM contract needed.
 
 **Build**:
-- [x] `lib/db.js` — `sql.js` singleton, schema auto-runs on boot
-- [x] SQLite schema: `businesses`, `circles`, `circle_members`, `loans`, `tranches`, `proofs`, `proof_approvals`, `borrower_tiers`, `points_ledger`, `lender_interest`, `vault_deposits` (11 tables)
-- [x] Vault helper functions in `lib/db.js`: `getVaultTotal()`, `getLenderBalance()`, `recordDeposit()`, `recordWithdrawal()` — replaces the 4 Rust contract functions 1:1
-- [x] Add `blackbusiness.db` to `.gitignore`
+- [x] ~~`lib/db.js` — `sql.js` singleton~~ → Migrated to Supabase. `lib/supabase/server.js`, `client.js`, `auth.js`, `db.js` replace the old SQLite layer.
+- [x] ~~SQLite schema~~ → `supabase/schema.sql`: `profiles`, `businesses`, `circles`, `circle_members`, `loans`, `tranches`, `proofs`, `proof_approvals`, `borrower_tiers`, `points_ledger`, `lender_interest`, `vault_deposits` (12 tables). All `*_pseudonym` columns replaced with `*_user_id UUID` foreign keys.
+- [x] Vault helper functions in `lib/supabase/db.js`: `getVaultTotal()`, `getLenderBalance()`, `recordDeposit()`, `recordWithdrawal()` — backed by Postgres RPC functions
+- [x] ~~Add `blackbusiness.db` to `.gitignore`~~ — no local DB file needed with Supabase
+- [x] `middleware.js` — Supabase Auth session refresh + route protection
+- [x] Auth pages wired to Supabase Auth: login, create-customer-account, create-business-account, forgot-password
+- [x] All 18 API routes migrated from SQLite to Supabase query builder
 
-**Verify**: Import `lib/db.js`, call `getDb()`, confirm all 11 tables exist. Test vault helpers: deposit, get total, get balance, withdraw with balance check.
+**Verify**: Run `supabase/schema.sql` in SQL Editor. Create account → sign in → vault deposit works → data visible in Supabase dashboard.
 
 ### PHASE 6: SAV Vault Frontend (Lender Flow)
 **Goal**: Community lenders can deposit via Stripe, track vault health, see earned interest, and withdraw.
@@ -858,8 +868,8 @@ These are ready to use as-is or as reference patterns:
 **Goal**: Complete, tested, responsive application.
 
 **Build**:
-- [ ] `app/api/auth/route.js` — Pseudonymous auth (email optional)
-- [ ] `components/providers/AuthProvider.js` — Role-based routing guards
+- [x] Auth — Replaced pseudonym system with Supabase Auth (email+password). Login, signup, forgot-password pages wired to `supabase.auth`. `middleware.js` refreshes session + redirects unauthenticated users. `requireAuth()` helper protects all API routes.
+- [x] Role-based routing guards — `middleware.js` redirects unauthenticated users to `/login` for protected paths (`/dashboard`, `/vault`, `/lending`, `/rewards`, `/business`, `/checkout`)
 - [ ] Loading states, error handling on all forms
 - [ ] Responsive design (mobile-first for customer-facing pages)
 - [ ] Edge case handling: insufficient vault capital, expired escrows, failed Stripe payments

@@ -1,7 +1,6 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import Link from "next/link";
 import Topbar from "@/components/layout/Header";
 import PointsBalance from "@/components/rewards/PointsBalance";
 import PointsHistory from "@/components/rewards/PointsHistory";
@@ -37,9 +36,10 @@ export default function RewardsPage() {
       <Topbar />
       <main className="content">
         <section className="page-head"><h1>Rewards</h1></section>
-        <PointsBalance points={loading ? 0 : points} />
-        <PointsHistory items={history} />
-        <Link href="/rewards/redeem" className="btn btn-solid">Redeem Points</Link>
+        <div style={{ display: "flex", flexDirection: "column", gap: "1.5rem" }}>
+          <PointsBalance points={loading ? 0 : points} />
+          <PointsHistory items={history} />
+        </div>
       </main>
     </>
   );

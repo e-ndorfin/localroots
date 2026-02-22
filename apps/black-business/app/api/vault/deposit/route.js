@@ -11,6 +11,18 @@ const { RLUSD_CURRENCY_HEX, RLUSD_ISSUER, VAULT_ADDRESS } = require("@/lib/const
 export async function POST(request) {
   try {
     const user = await requireAuth();
+
+    // Businesses cannot deposit into the community vault
+    const supabase = await createClient();
+    const { data: profile } = await supabase
+      .from("profiles")
+      .select("role")
+      .eq("id", user.id)
+      .single();
+    if (profile?.role === "business") {
+      return NextResponse.json({ error: "Business accounts cannot deposit into the vault" }, { status: 403 });
+    }
+
     const { amountCents } = await request.json();
 
     if (!amountCents || amountCents <= 0) {

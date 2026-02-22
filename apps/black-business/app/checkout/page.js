@@ -42,6 +42,11 @@ export default function CheckoutPage() {
     window.localStorage.setItem(CART_KEY, JSON.stringify(next));
   }
 
+  function removeItem(index) {
+    const next = items.filter((_, i) => i !== index);
+    setAndPersist(next);
+  }
+
   function toggleItem(index) {
     const item = items[index];
     if (!item) return;
@@ -152,10 +157,23 @@ export default function CheckoutPage() {
                       <h3>{item.name}</h3>
                       <p className="muted">{item.usePoints ? `${pointsCost.toLocaleString()} pts` : `$${Number(item.price || 0).toFixed(2)}`}</p>
                     </div>
-                    <label className="points-toggle">
-                      <input type="checkbox" checked={Boolean(item.usePoints)} onChange={() => toggleItem(index)} />
-                      <span>Use points</span>
-                    </label>
+                    <div style={{ display: "flex", alignItems: "center", gap: "0.75rem" }}>
+                      <label className="points-toggle">
+                        <input type="checkbox" checked={Boolean(item.usePoints)} onChange={() => toggleItem(index)} />
+                        <span>Use points</span>
+                      </label>
+                      <button
+                        onClick={() => removeItem(index)}
+                        style={{
+                          background: "none", border: "none", cursor: "pointer",
+                          fontSize: 18, lineHeight: 1, color: "var(--muted)",
+                          padding: "4px 6px", borderRadius: 6, fontFamily: "inherit",
+                        }}
+                        title="Remove item"
+                      >
+                        ×
+                      </button>
+                    </div>
                   </article>
                 );
               }) : <p className="muted">Your cart is empty. Add products from a storefront.</p>}
