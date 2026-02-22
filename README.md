@@ -1,3 +1,57 @@
+# For Jamie
+
+You're working on the frontend, which lives in `apps/web/` (Next.js 14 + React 18 + Tailwind CSS). There is no backend server — the frontend talks directly to the XRP Ledger over WebSocket.
+
+## First-time setup (Mac)
+
+### 1. Install Homebrew (if you don't have it)
+```bash
+/bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)"
+```
+
+### 2. Install Node.js and pnpm
+```bash
+brew install node
+npm install -g pnpm
+```
+Verify with `node -v` (should be 18+) and `pnpm -v` (should be 8+).
+
+### 3. Clone the repo
+```bash
+git clone https://github.com/e-ndorfin/localroots.git
+cd localroots
+```
+
+### 4. Install dependencies
+```bash
+pnpm install
+```
+
+### 5. Set up env files
+```bash
+cp apps/web/.env.example apps/web/.env
+cp apps/web/.env.local.example apps/web/.env.local
+```
+You don't need to fill in the API keys to get started — the app runs without them.
+
+### 6. Run the frontend
+```bash
+pnpm --filter web dev
+```
+Open [http://localhost:3000](http://localhost:3000) in your browser.
+
+## Where to work
+
+- **Pages** — `apps/web/app/` (Next.js App Router)
+- **Components** — `apps/web/components/` (React components like Header, AccountInfo, TransactionForm, etc.)
+- **Hooks** — `apps/web/hooks/` (wallet connection logic)
+- **Styles** — Tailwind CSS, configured in `apps/web/tailwind.config.js`
+- **Network config** — `apps/web/lib/networks.js`
+
+You don't need to touch `packages/` (smart contracts) or `apps/web-nuxt/` (Vue version, we're not using it).
+
+---
+
 # Scaffold-XRP
 
 A Next.js-based development stack for building decentralized applications on XRPL with smart contracts. Built with Turborepo, inspired by Scaffold-ETH-2.
