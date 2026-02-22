@@ -8,7 +8,7 @@
 const xrpl = require("xrpl");
 
 // XRPL Network Configuration
-const XRPL_SERVER = "wss://s.altnet.rippletest.net:51233"; // XRPL Testnet server
+const XRPL_SERVER = "wss://s.devnet.rippletest.net:51233"; // XRPL Devnet server
 
 // Transaction Configuration
 /**
@@ -16,8 +16,8 @@ const XRPL_SERVER = "wss://s.altnet.rippletest.net:51233"; // XRPL Testnet serve
  * 🎯 DESTINATION_ADDRESS: The XRP address receiving the payment
  * 💰 AMOUNT_XRP: The amount of XRP to send
  */
-const SOURCE_SEED = "sEd7HWeVRiA5uLAUVe8PybGf5rmkUHP"; // Replace with the source wallet seed
-const DESTINATION_ADDRESS = "rnqpUDjYSjAG5YGhrHFbVXRg92GWgmgfow"; // Destination wallet address
+const SOURCE_SEED = "sEd77JrzWraPanYQKyDJeJNa2FyXaUn"; // Wallet A seed (Devnet)
+const DESTINATION_ADDRESS = "rKitZekX6XeikTo32MoQCSdXs5bWsDfqhw"; // Wallet B address (Devnet)
 const AMOUNT_XRP = "1"; // Amount in XRP to send
 
 /**

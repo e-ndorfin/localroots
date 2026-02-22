@@ -12,13 +12,13 @@ const xrpl = require("xrpl");
  * @throws {Error} If there is an issue connecting to the network or funding the wallet
  */
 async function main() {
-    let client = new xrpl.Client("wss://s.altnet.rippletest.net:51233");;
+    let client = new xrpl.Client("wss://s.devnet.rippletest.net:51233");
     
     try {
         // Step 1: Connect to the XRPL Testnet
-        client = new xrpl.Client("wss://s.altnet.rippletest.net:51233");
+        client = new xrpl.Client("wss://s.devnet.rippletest.net:51233");
         await client.connect();
-        console.log("✅ Connected to the XRPL Testnet");
+        console.log("✅ Connected to the XRPL Devnet");
 
         // Step 2: Generate a new wallet
         const wallet = xrpl.Wallet.generate();
