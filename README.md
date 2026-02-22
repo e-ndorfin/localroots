@@ -2,40 +2,40 @@
 
 You're working on the frontend, which lives in `apps/web/` (Next.js 14 + React 18 + Tailwind CSS). There is no backend server — the frontend talks directly to the XRP Ledger over WebSocket.
 
-## First-time setup (Mac)
+## First-time setup (Windows)
 
-### 1. Install Homebrew (if you don't have it)
-```bash
-/bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)"
-```
+### 1. Install Node.js
+Download and install from [https://nodejs.org](https://nodejs.org) (pick the LTS version, 18+). This also installs npm.
 
-### 2. Install Node.js and pnpm
-```bash
-brew install node
+### 2. Install pnpm and Git
+Open PowerShell and run:
+```powershell
 npm install -g pnpm
 ```
+If you don't have Git, install it from [https://git-scm.com/download/win](https://git-scm.com/download/win).
+
 Verify with `node -v` (should be 18+) and `pnpm -v` (should be 8+).
 
 ### 3. Clone the repo
-```bash
+```powershell
 git clone https://github.com/e-ndorfin/localroots.git
 cd localroots
 ```
 
 ### 4. Install dependencies
-```bash
+```powershell
 pnpm install
 ```
 
 ### 5. Set up env files
-```bash
-cp apps/web/.env.example apps/web/.env
-cp apps/web/.env.local.example apps/web/.env.local
+```powershell
+copy apps\web\.env.example apps\web\.env
+copy apps\web\.env.local.example apps\web\.env.local
 ```
 You don't need to fill in the API keys to get started — the app runs without them.
 
 ### 6. Run the frontend
-```bash
+```powershell
 pnpm --filter web dev
 ```
 Open [http://localhost:3000](http://localhost:3000) in your browser.
